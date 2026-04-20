@@ -18,7 +18,7 @@ This repository is a **fork of [MiSTer-devel/Main_MiSTer](https://github.com/MiS
 
 4. **Prefer `support/<core>/` additions.** New per-core functionality belongs in new files under the existing `support/<core>/` directory — the Makefile already globs these in automatically.
 
-5. **Isolate fork-specific code.** If upstream-file edits are unavoidable, wrap them in clearly named macros or `#include` guards (e.g., `#ifdef ZAPAROO_FORK`) so conflicts are trivially resolvable and the intent is obvious.
+5. **Isolate fork-specific code.** If upstream-file edits are unavoidable, wrap them in clearly named macros or `#include` guards (e.g., `#ifdef ZAPAROO`) so conflicts are trivially resolvable and the intent is obvious.
 
 6. **Never touch the Makefile unless strictly necessary.** Makefile conflicts are painful to auto-resolve. Use the existing glob rules instead of adding explicit file references.
 

@@ -39,6 +39,9 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "support.h"
+#ifdef ZAPAROO
+#include "support/alt_launcher/alt_launcher.h"
+#endif
 
 static char core_path[1024] = {};
 static char rbf_path[1024] = {};
@@ -1526,6 +1529,9 @@ void user_io_init(const char *path, const char *xml)
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
 				if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
 				else user_io_status_set("[3:1]", 0);
+#ifdef ZAPAROO
+				alt_launcher_init();
+#endif
 			}
 			else
 			{

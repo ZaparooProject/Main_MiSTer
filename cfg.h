@@ -105,6 +105,9 @@ typedef struct {
 	char autofire_rates[3072];
 	uint8_t autofire_on_directions;
 	char screenshot_image_format[16];
+#ifdef ZAPAROO
+	char alt_launcher[1024];
+#endif
 
 } cfg_t;
 
