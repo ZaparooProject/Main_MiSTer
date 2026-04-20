@@ -1,0 +1,43 @@
+name: Sync + Release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync upstream
+        id: sync
+        run: bash .github/sync_upstream.sh
+
+      - name: Cache ARM toolchain
+        if: steps.sync.outputs.changed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf
+          key: gcc-arm-10.2-2020.11
+
+      - name: Push merge commit
+        if: steps.sync.outputs.changed == 'true'
+        run: git push origin master
+
+      - name: Build and release
+        if: steps.sync.outputs.changed == 'true'
+        run: bash .github/build_release.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
