@@ -28,4 +28,4 @@ docker run --rm \
     -u "$(id -u):$(id -g)" \
     -e HOME=/tmp \
     "${IMAGE_TAG}" \
-    bash -c 'PATH="$(ls -d /usr/local/bin/gcc-arm-*/bin):$PATH" exec make "$@"' -- "$@"
+    bash -c 'PATH="$(ls -d /usr/local/bin/gcc-arm-*/bin):$PATH" exec make PRJ=MiSTer_Zaparoo "$@"' -- "$@"
