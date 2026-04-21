@@ -35,6 +35,9 @@
 #include "str_util.h"
 #include "frame_timer.h"
 #include "scaler.h"
+#ifdef ZAPAROO
+#include "support/zaparoo/zaparoo.h"
+#endif
 
 #define NUMDEV 30
 #define UINPUT_NAME "MiSTer virtual input"
@@ -5901,6 +5904,12 @@ int input_test(int getchar)
 						else if (!strcmp(cmd + 7, "unmute")) set_volume(0x80);
 						else if (cmd[7] >= '0' && cmd[7] <= '7') set_volume(0x40 - 0x30 + cmd[7]);
 					}
+#ifdef ZAPAROO
+					else
+					{
+						zaparoo_handle_input_cmd(cmd);
+					}
+#endif
 				}
 			}
 

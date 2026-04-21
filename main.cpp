@@ -32,7 +32,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "frame_timer.h"
 #include "fpga_io.h"
 #ifdef ZAPAROO
-#include "support/alt_launcher/alt_launcher.h"
+#include "support/zaparoo/alt_launcher.h"
 #endif
 #include "scheduler.h"
 #include "osd.h"

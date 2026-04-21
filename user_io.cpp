@@ -40,7 +40,8 @@
 #include "scaler.h"
 #include "support.h"
 #ifdef ZAPAROO
-#include "support/alt_launcher/alt_launcher.h"
+#include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/zaparoo.h"
 #endif
 
 static char core_path[1024] = {};
@@ -1718,6 +1719,9 @@ void user_io_init(const char *path, const char *xml)
 	if (uartmode < 3 || uartmode > 4) midilink = 0;
 	SetMidiLinkMode(midilink);
 	SetUARTMode(uartmode);
+#ifdef ZAPAROO
+	zaparoo_publish_features();
+#endif
 
 	f12_mod = spi_uio_cmd(UIO_GET_F12_MOD);
 

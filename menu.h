@@ -26,4 +26,8 @@ void StoreIdx_S(int idx, const char *path);
 
 int menu_present();
 
+#ifdef ZAPAROO
+void menu_show_picker();
+#endif
+
 #endif
