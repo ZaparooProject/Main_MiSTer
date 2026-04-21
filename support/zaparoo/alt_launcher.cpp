@@ -36,14 +36,22 @@ static void spawn(void)
 
 	user_io_osd_key_enable(0);
 
-	int tty_fd = open("/dev/tty2", O_WRONLY | O_CLOEXEC);
+	int tty_fd = open("/dev/tty6", O_WRONLY | O_CLOEXEC);
 	if (tty_fd >= 0)
 	{
 		write(tty_fd, "\033c", 2);
 		close(tty_fd);
 	}
 
-	video_chvt(2);
+	video_chvt(6);
+
+	tty_fd = open("/dev/tty6", O_WRONLY | O_CLOEXEC);
+	if (tty_fd >= 0)
+	{
+		write(tty_fd, "\033c", 2);
+		close(tty_fd);
+	}
+
 	video_fb_enable(1);
 
 	s_pid = fork();
@@ -65,7 +73,7 @@ static void spawn(void)
 		sched_setaffinity(0, sizeof(set), &set);
 		setsid();
 		execl("/sbin/agetty", "/sbin/agetty", "-a", "root", "-l",
-		      "/tmp/alt_launcher", "-i", "--nohostname", "-L", "tty2", "linux", NULL);
+		      "/tmp/alt_launcher", "-i", "--nohostname", "-L", "tty6", "linux", NULL);
 		_exit(1);
 	}
 }
