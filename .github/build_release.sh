@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+MISTER_GCC_INSTALL_DIR=""
+MISTER_GCC_VER=""
+MISTER_GCC_HOST_ARCH=""
 source setup_default_toolchain.sh
 make PRJ=MiSTer_Zaparoo
 

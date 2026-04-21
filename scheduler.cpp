@@ -9,7 +9,7 @@
 #include "osd.h"
 #include "profiling.h"
 #ifdef ZAPAROO
-#include "support/alt_launcher/alt_launcher.h"
+#include "support/zaparoo/alt_launcher.h"
 #endif
 
 static cothread_t co_scheduler = nullptr;

@@ -17,7 +17,7 @@
 #include "shmem.h"
 #include "offload.h"
 #ifdef ZAPAROO
-#include "support/alt_launcher/alt_launcher.h"
+#include "support/zaparoo/alt_launcher.h"
 #endif
 
 #include "fpga_base_addr_ac5.h"
