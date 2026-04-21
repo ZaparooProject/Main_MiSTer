@@ -144,6 +144,4 @@ void alt_launcher_shutdown(void)
 		waitpid(s_pid, NULL, 0);
 		s_pid = 0;
 	}
-	video_fb_enable(0);
-	video_chvt(1);
 }
