@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) 2020 José Manuel Barroso Galindo <theypsilon@gmail.com>
+# Adapted from https://github.com/MiSTer-DB9/Main_MiSTer
+#
 # Build MiSTer binary and publish a GitHub Release.
 # Requires GH_TOKEN in environment.
 
