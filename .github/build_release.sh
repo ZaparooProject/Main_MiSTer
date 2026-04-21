@@ -5,18 +5,16 @@
 set -euo pipefail
 
 source setup_default_toolchain.sh
-make
+make PRJ=MiSTer_Zaparoo
 
-RELEASE_NAME="MiSTer_$(date -u +%Y%m%d)"
-cp bin/MiSTer "${RELEASE_NAME}"
-cp bin/MiSTer.elf "${RELEASE_NAME}.elf"
+RELEASE_TAG="MiSTer_Zaparoo_$(date -u +%Y%m%d)"
 
 # Last build of the day wins.
-gh release delete "${RELEASE_NAME}" --cleanup-tag --yes 2>/dev/null || true
+gh release delete "${RELEASE_TAG}" --cleanup-tag --yes 2>/dev/null || true
 
 SHORT_SHA=$(git rev-parse --short HEAD)
-gh release create "${RELEASE_NAME}" \
-    --title "${RELEASE_NAME}" \
+gh release create "${RELEASE_TAG}" \
+    --title "${RELEASE_TAG}" \
     --notes "Automated build from commit ${SHORT_SHA}" \
-    "${RELEASE_NAME}" \
-    "${RELEASE_NAME}.elf"
+    "bin/MiSTer_Zaparoo" \
+    "bin/MiSTer_Zaparoo.elf"
