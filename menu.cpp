@@ -2982,9 +2982,12 @@ void HandleUI(void)
 				break;
 
 			case 15:
+				snprintf(Selected_tmp, sizeof(Selected_tmp), "%s", user_io_get_core_name());
+				if (!findDocsDir(Selected_tmp, sizeof(Selected_tmp))) {
 				FileCreatePath(DOCS_DIR);
 				snprintf(Selected_tmp, sizeof(Selected_tmp), DOCS_DIR "/%s",user_io_get_core_name());
 				FileCreatePath(Selected_tmp);
+				}
 				SelectFile(Selected_tmp, "PDFTXTMD ",  SCANO_DIR | SCANO_TXT  , MENU_DOC_FILE_SELECTED, MENU_COMMON1);
 				break;
 
