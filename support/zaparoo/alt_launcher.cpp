@@ -96,7 +96,9 @@ void alt_launcher_poll(void)
 		{
 			s_pid = 0;
 			user_io_osd_key_enable(1);
-			bool crashed = WIFSIGNALED(status) || (WIFEXITED(status) && WEXITSTATUS(status) != 0);
+			int sig = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
+			bool killed = sig == SIGTERM || sig == SIGKILL;
+			bool crashed = !killed && (sig != 0 || (WIFEXITED(status) && WEXITSTATUS(status) != 0));
 			if (crashed && ++s_crash_count >= 3)
 			{
 				printf("alt_launcher: giving up after 3 crashes\n");
