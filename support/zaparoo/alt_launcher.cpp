@@ -18,6 +18,46 @@ static pid_t s_pid = 0;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
 static bool s_gave_up = false;
+static bool s_init_pending = false;
+static const int s_vt = 6;
+static const char s_tty[] = "tty6";
+static const char s_tty_path[] = "/dev/tty6";
+
+static void clear_launcher_tty(void)
+{
+	int tty_fd = open(s_tty_path, O_WRONLY | O_CLOEXEC);
+	if (tty_fd >= 0)
+	{
+		static const char blank[] = "\033[?25l\033[40m\033[30m\033[2J\033[H";
+		write(tty_fd, blank, sizeof(blank) - 1);
+		close(tty_fd);
+	}
+}
+
+static void return_to_normal_mode(void)
+{
+	user_io_osd_key_enable(1);
+	video_menu_bg(user_io_status_get("[3:1]"));
+	video_fb_enable(0);
+	s_respawn_timer = 0;
+	s_crash_count = 0;
+	s_gave_up = true;
+}
+
+static void reset_launcher_state(void)
+{
+	s_pid = 0;
+	s_respawn_timer = 0;
+	s_crash_count = 0;
+	s_gave_up = false;
+	s_init_pending = false;
+}
+
+static void kill_launcher(pid_t pid, int sig)
+{
+	if (kill(-pid, sig) && errno == ESRCH)
+		kill(pid, sig);
+}
 
 static void spawn(void)
 {
@@ -26,7 +66,7 @@ static void spawn(void)
 	path[sizeof(path) - 1] = '\0';
 
 	static const char cmd[] =
-		"#!/bin/bash\nexport LC_ALL=en_US.UTF-8\nexport HOME=/root\nexec \"$ALT_LAUNCHER_PATH\"\n";
+		"#!/bin/bash\nexport LC_ALL=en_US.UTF-8\nexport HOME=/root\nprintf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\nexec \"$ALT_LAUNCHER_PATH\"\n";
 
 	unlink("/tmp/alt_launcher");
 	if (!FileSave("/tmp/alt_launcher", (void*)cmd, strlen(cmd)))
@@ -35,24 +75,7 @@ static void spawn(void)
 	setenv("ALT_LAUNCHER_PATH", path, 1);
 
 	user_io_osd_key_enable(0);
-
-	int tty_fd = open("/dev/tty6", O_WRONLY | O_CLOEXEC);
-	if (tty_fd >= 0)
-	{
-		write(tty_fd, "\033c", 2);
-		close(tty_fd);
-	}
-
-	video_chvt(6);
-
-	tty_fd = open("/dev/tty6", O_WRONLY | O_CLOEXEC);
-	if (tty_fd >= 0)
-	{
-		write(tty_fd, "\033c", 2);
-		close(tty_fd);
-	}
-
-	video_fb_enable(1);
+	clear_launcher_tty();
 
 	s_pid = fork();
 	if (s_pid < 0)
@@ -61,7 +84,6 @@ static void spawn(void)
 		s_pid = 0;
 		user_io_osd_key_enable(1);
 		video_fb_enable(0);
-		video_chvt(1);
 		return;
 	}
 	printf("alt_launcher: spawned pid=%d path=%s\n", s_pid, path);
@@ -73,9 +95,18 @@ static void spawn(void)
 		sched_setaffinity(0, sizeof(set), &set);
 		setsid();
 		execl("/sbin/agetty", "/sbin/agetty", "-a", "root", "-l",
-		      "/tmp/alt_launcher", "-i", "--nohostname", "-L", "tty6", "linux", NULL);
+		      "/tmp/alt_launcher", "-i", "--nohostname", "-L", s_tty, "linux", NULL);
 		_exit(1);
 	}
+
+	usleep(100000);
+	video_chvt(s_vt);
+	video_fb_enable(1);
+}
+
+bool alt_launcher_active(void)
+{
+	return s_pid != 0;
 }
 
 void alt_launcher_init(void)
@@ -84,7 +115,7 @@ void alt_launcher_init(void)
 		return;
 	s_crash_count = 0;
 	s_respawn_timer = 0;
-	spawn();
+	s_init_pending = true;
 }
 
 void alt_launcher_poll(void)
@@ -96,15 +127,21 @@ void alt_launcher_poll(void)
 		{
 			s_pid = 0;
 			user_io_osd_key_enable(1);
+			bool exited = WIFEXITED(status);
+			int exit_status = exited ? WEXITSTATUS(status) : 0;
 			int sig = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
-			bool killed = sig == SIGTERM || sig == SIGKILL;
-			bool crashed = !killed && (sig != 0 || (WIFEXITED(status) && WEXITSTATUS(status) != 0));
+			bool escaped = (exited && exit_status == 0) || sig == SIGTERM || sig == SIGINT;
+			bool crashed = sig != 0 || (exited && exit_status != 0);
+			if (escaped)
+			{
+				printf("alt_launcher: exited, returning to normal mode until restart\n");
+				return_to_normal_mode();
+				return;
+			}
 			if (crashed && ++s_crash_count >= 3)
 			{
 				printf("alt_launcher: giving up after 3 crashes\n");
-				video_fb_enable(0);
-				video_chvt(1);
-				s_gave_up = true;
+				return_to_normal_mode();
 				return;
 			}
 			if (!crashed)
@@ -118,6 +155,13 @@ void alt_launcher_poll(void)
 	if (!cfg.alt_launcher[0] || !cfg.fb_terminal)
 		return;
 
+	if (s_init_pending)
+	{
+		s_init_pending = false;
+		spawn();
+		return;
+	}
+
 	if (s_respawn_timer && CheckTimer(s_respawn_timer))
 	{
 		s_respawn_timer = 0;
@@ -128,12 +172,16 @@ void alt_launcher_poll(void)
 void alt_launcher_shutdown(void)
 {
 	if (!s_pid)
+	{
+		reset_launcher_state();
 		return;
+	}
 
-	kill(s_pid, SIGTERM);
+	pid_t pid = s_pid;
+	kill_launcher(pid, SIGTERM);
 	for (int i = 0; i < 50; i++)
 	{
-		if (waitpid(s_pid, NULL, WNOHANG) == s_pid)
+		if (waitpid(pid, NULL, WNOHANG) == pid)
 		{
 			s_pid = 0;
 			break;
@@ -142,8 +190,9 @@ void alt_launcher_shutdown(void)
 	}
 	if (s_pid)
 	{
-		kill(s_pid, SIGKILL);
-		waitpid(s_pid, NULL, 0);
-		s_pid = 0;
+		kill_launcher(pid, SIGKILL);
+		waitpid(pid, NULL, 0);
 	}
+
+	reset_launcher_state();
 }
