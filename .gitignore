@@ -32,4 +32,5 @@ MiSTer
 
 CLAUDE.md
 .claude/
+.opencode/
 .env
