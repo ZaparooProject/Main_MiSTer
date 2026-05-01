@@ -7,6 +7,7 @@
 
 set -euo pipefail
 
+# Use the toolchain script's defaults; ignore any inherited runner env.
 MISTER_GCC_INSTALL_DIR=""
 MISTER_GCC_VER=""
 MISTER_GCC_HOST_ARCH=""

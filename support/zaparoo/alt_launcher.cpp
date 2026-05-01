@@ -29,7 +29,7 @@ static void clear_launcher_tty(void)
 	if (tty_fd >= 0)
 	{
 		static const char blank[] = "\033[?25l\033[40m\033[30m\033[2J\033[H";
-		write(tty_fd, blank, sizeof(blank) - 1);
+		if (write(tty_fd, blank, sizeof(blank) - 1) < 0) {}
 		close(tty_fd);
 	}
 }
@@ -66,13 +66,15 @@ static void spawn(void)
 	path[sizeof(path) - 1] = '\0';
 
 	static const char cmd[] =
-		"#!/bin/bash\nexport LC_ALL=en_US.UTF-8\nexport HOME=/root\nprintf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\nexec \"$ALT_LAUNCHER_PATH\"\n";
+		"#!/bin/bash\n"
+		"export LC_ALL=en_US.UTF-8\n"
+		"export HOME=/root\n"
+		"printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
+		"exec \"$ALT_LAUNCHER_PATH\"\n";
 
 	unlink("/tmp/alt_launcher");
 	if (!FileSave("/tmp/alt_launcher", (void*)cmd, strlen(cmd)))
 		return;
-
-	setenv("ALT_LAUNCHER_PATH", path, 1);
 
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
@@ -89,6 +91,7 @@ static void spawn(void)
 	printf("alt_launcher: spawned pid=%d path=%s\n", s_pid, path);
 	if (!s_pid)
 	{
+		setenv("ALT_LAUNCHER_PATH", path, 1);
 		cpu_set_t set;
 		CPU_ZERO(&set);
 		CPU_SET(0, &set);
@@ -99,6 +102,7 @@ static void spawn(void)
 		_exit(1);
 	}
 
+	// Give agetty time to grab s_tty before chvt switches to it.
 	usleep(100000);
 	video_chvt(s_vt);
 	video_fb_enable(1);
@@ -131,7 +135,7 @@ void alt_launcher_poll(void)
 			int exit_status = exited ? WEXITSTATUS(status) : 0;
 			int sig = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
 			bool escaped = (exited && exit_status == 0) || sig == SIGTERM || sig == SIGINT;
-			bool crashed = sig != 0 || (exited && exit_status != 0);
+			bool crashed = !escaped && (sig != 0 || (exited && exit_status != 0));
 			if (escaped)
 			{
 				printf("alt_launcher: exited, returning to normal mode until restart\n");
@@ -191,7 +195,16 @@ void alt_launcher_shutdown(void)
 	if (s_pid)
 	{
 		kill_launcher(pid, SIGKILL);
-		waitpid(pid, NULL, 0);
+		// Bounded — don't wedge the UI if the task is stuck in D-state.
+		for (int i = 0; i < 100; i++)
+		{
+			if (waitpid(pid, NULL, WNOHANG) == pid)
+			{
+				s_pid = 0;
+				break;
+			}
+			usleep(10000);
+		}
 	}
 
 	reset_launcher_state();

@@ -219,16 +219,11 @@ enum MENU
 	MENU_ATARI8BIT_CART1,
 	MENU_ATARI8BIT_CART2,
 
-#ifdef ZAPAROO
-	// External widgets
 	MENU_PICKER_SELECTED,
-#endif
 };
 
-#ifdef ZAPAROO
 #define MENU_PICKER_ITEMS_DIR "/tmp/PICKERITEMS"
 #define MENU_PICKER_SELECTED_FILE "/tmp/PICKERSELECTED"
-#endif
 
 static uint32_t menustate = MENU_NONE1;
 static uint32_t parentstate;
@@ -6694,11 +6689,7 @@ void HandleUI(void)
 			FILE *f = fopen("/MiSTer.version", "r");
 			if (f)
 			{
-#ifdef ZAPAROO
 				if (fread(str, 6, 1, f)) sprintf(s, " MiSTer v%sZ, OS v%s", version + 5, str);
-#else
-				if (fread(str, 6, 1, f)) sprintf(s, " MiSTer v%s,  OS v%s", version + 5, str);
-#endif
 				fclose(f);
 			}
 		}
@@ -7577,14 +7568,12 @@ void HandleUI(void)
 		}
 		break;
 
-#ifdef ZAPAROO
 	case MENU_PICKER_SELECTED:
 		memcpy(Selected_tmp, selPath, sizeof(Selected_tmp));
 		MakeFile(MENU_PICKER_SELECTED_FILE, Selected_tmp);
 		OsdClear();
 		menustate = MENU_NONE1;
 		break;
-#endif
 
 		/******************************************************************/
 		/* we should never come here                                      */
@@ -8029,7 +8018,6 @@ void ProgressMessage(const char* title, const char* text, int current, int max)
 	}
 }
 
-#ifdef ZAPAROO
 void menu_show_picker()
 {
 	FileCreatePath(MENU_PICKER_ITEMS_DIR);
@@ -8037,4 +8025,3 @@ void menu_show_picker()
 	OsdEnable(DISABLE_KEYBOARD);
 	SelectFile(Selected_tmp, "TXT", SCANO_TXT, MENU_PICKER_SELECTED, MENU_NONE1);
 }
-#endif

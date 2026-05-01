@@ -1,4 +1,3 @@
-#ifdef ZAPAROO
 #include "zaparoo.h"
 #include "../../menu.h"
 #include "../../user_io.h"
@@ -28,4 +27,3 @@ bool zaparoo_handle_input_cmd(const char *cmd)
 	}
 	return false;
 }
-#endif

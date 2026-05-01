@@ -16,9 +16,7 @@
 #include "menu.h"
 #include "shmem.h"
 #include "offload.h"
-#ifdef ZAPAROO
 #include "support/zaparoo/alt_launcher.h"
-#endif
 
 #include "fpga_base_addr_ac5.h"
 #include "fpga_manager.h"
@@ -617,9 +615,7 @@ char *getappname()
 
 void app_restart(const char *path, const char *xml, const char *exe)
 {
-#ifdef ZAPAROO
 	alt_launcher_shutdown();
-#endif
 	sync();
 	fpga_core_reset(1);
 

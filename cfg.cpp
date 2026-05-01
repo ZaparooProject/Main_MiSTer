@@ -68,11 +68,7 @@ static const ini_var_t ini_vars[] =
 	{ "OSD_ROTATE", (void*)(&(cfg.osd_rotate)), UINT8, 0, 2 },
 	{ "DEADZONE", (void*)(&(cfg.controller_deadzone)), STRINGARR, sizeof(cfg.controller_deadzone) / sizeof(*cfg.controller_deadzone), sizeof(*cfg.controller_deadzone) },
 	{ "GAMEPAD_DEFAULTS", (void*)(&(cfg.gamepad_defaults)), UINT8, 0, 1 },
-#ifdef ZAPAROO
-	{ "RECENTS", (void*)(&(cfg.recents)), UINT8, 1, 1 },
-#else
 	{ "RECENTS", (void*)(&(cfg.recents)), UINT8, 0, 1 },
-#endif
 	{ "CONTROLLER_INFO", (void*)(&(cfg.controller_info)), UINT8, 0, 10 },
 	{ "REFRESH_MIN", (void*)(&(cfg.refresh_min)), FLOAT, 0, 150 },
 	{ "REFRESH_MAX", (void*)(&(cfg.refresh_max)), FLOAT, 0, 150 },
@@ -100,11 +96,7 @@ static const ini_var_t ini_vars[] =
 	{ "SHMASK_DEFAULT", (void*)(&(cfg.shmask_default)), STRING, 0, sizeof(cfg.shmask_default) - 1 },
 	{ "SHMASK_MODE_DEFAULT", (void*)(&(cfg.shmask_mode_default)), UINT8, 0, 255 },
 	{ "PRESET_DEFAULT", (void*)(&(cfg.preset_default)), STRING, 0, sizeof(cfg.preset_default) - 1 },
-#ifdef ZAPAROO
-	{ "LOG_FILE_ENTRY", (void*)(&(cfg.log_file_entry)), UINT8, 1, 1 },
-#else
 	{ "LOG_FILE_ENTRY", (void*)(&(cfg.log_file_entry)), UINT8, 0, 1 },
-#endif
 	{ "BT_AUTO_DISCONNECT", (void*)(&(cfg.bt_auto_disconnect)), UINT32, 0, 180 },
 	{ "BT_RESET_BEFORE_PAIR", (void*)(&(cfg.bt_reset_before_pair)), UINT8, 0, 1 },
 	{ "WAITMOUNT", (void*)(&(cfg.waitmount)), STRING, 0, sizeof(cfg.waitmount) - 1 },
@@ -143,9 +135,7 @@ static const ini_var_t ini_vars[] =
 	{ "AUTOFIRE_RATES", (void *)(&(cfg.autofire_rates)), STRING, 0, sizeof(cfg.autofire_rates) - 1 },
 	{ "AUTOFIRE_ON_DIRECTIONS", (void *)(&(cfg.autofire_on_directions)), UINT8, 0, 1 },
 	{ "SCREENSHOT_IMAGE_FORMAT", (void *)(&(cfg.screenshot_image_format)), STRING, 0, sizeof(cfg.screenshot_image_format) - 1 },
-#ifdef ZAPAROO
 	{ "ALT_LAUNCHER", (void*)(&(cfg.alt_launcher)), STRING, 0, sizeof(cfg.alt_launcher) - 1 },
-#endif
 
 };
 
@@ -611,7 +601,8 @@ void cfg_parse()
 	cfg_error_count = 0;
 	strcpy(cfg.autofire_rates, "10,15,30");
 	strcpy(cfg.screenshot_image_format, "png");
-	
+	cfg.recents = 1;
+
 	ini_parse(altcfg(), video_get_core_mode_name(1));
 	if (has_video_sections && !using_video_section)
 	{

@@ -8,9 +8,7 @@
 #include "fpga_io.h"
 #include "osd.h"
 #include "profiling.h"
-#ifdef ZAPAROO
 #include "support/zaparoo/alt_launcher.h"
-#endif
 
 static cothread_t co_scheduler = nullptr;
 static cothread_t co_poll = nullptr;
@@ -36,9 +34,7 @@ static void scheduler_co_poll(void)
 			user_io_poll();
 			frame_timer();
 			input_poll(0);
-#ifdef ZAPAROO
 			alt_launcher_poll();
-#endif
 		}
 
 		scheduler_yield();

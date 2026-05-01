@@ -3,13 +3,13 @@ set -euo pipefail
 
 BINARY=bin/MiSTer_Zaparoo
 REMOTE_PATH=/media/fat/MiSTer_Zaparoo
-MISTER_PASS=1
 
-# Load .env
 if [[ -f .env ]]; then
     # shellcheck disable=SC1091
     set -a; source .env; set +a
 fi
+
+MISTER_PASS="${MISTER_PASS:-1}"
 
 if [[ -z "${MISTER_IP:-}" ]]; then
     echo "error: MISTER_IP not set — create a .env file with MISTER_IP=<address>" >&2

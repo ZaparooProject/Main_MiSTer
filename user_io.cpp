@@ -40,10 +40,8 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "support.h"
-#ifdef ZAPAROO
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/zaparoo.h"
-#endif
 
 static char core_path[1024] = {};
 static char rbf_path[1024] = {};
@@ -1531,16 +1529,10 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
-#ifdef ZAPAROO
-				if (!cfg.alt_launcher[0] || !cfg.fb_terminal)
-#endif
-				{
-					if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
-					else user_io_status_set("[3:1]", 0);
-				}
-#ifdef ZAPAROO
-				alt_launcher_init();
-#endif
+				if (cfg.alt_launcher[0] && cfg.fb_terminal) alt_launcher_init();
+				else
+				if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
+				else user_io_status_set("[3:1]", 0);
 			}
 			else
 			{
@@ -1728,9 +1720,7 @@ void user_io_init(const char *path, const char *xml)
 	if (uartmode < 3 || uartmode > 4) midilink = 0;
 	SetMidiLinkMode(midilink);
 	SetUARTMode(uartmode);
-#ifdef ZAPAROO
 	zaparoo_publish_features();
-#endif
 
 	f12_mod = spi_uio_cmd(UIO_GET_F12_MOD);
 
@@ -4168,10 +4158,8 @@ void user_io_kbd(uint16_t key, int press)
 		if (key)
 		{
 			uint32_t code = get_ps2_code(key);
-#ifdef ZAPAROO
 			if (alt_launcher_active() && (key == KEY_MENU || key == KEY_F12))
 				return;
-#endif
 			bool is_menu_event = ((has_menu() || osd_is_visible || (get_key_mod() & (LALT | RALT | RGUI | LGUI))) && (((key == KEY_F12) && (!is_f12_mod_needed() || (get_key_mod() & (RGUI | LGUI)))) || key == KEY_MENU));
 			if (!press)
 			{
