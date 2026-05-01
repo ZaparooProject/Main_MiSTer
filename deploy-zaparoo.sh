@@ -2,7 +2,8 @@
 set -euo pipefail
 
 BINARY=bin/MiSTer_Zaparoo
-REMOTE_PATH=/media/fat/MiSTer_Zaparoo
+REMOTE_DIR=/media/fat/zaparoo
+REMOTE_PATH=$REMOTE_DIR/MiSTer_Zaparoo
 
 if [[ -f .env ]]; then
     # shellcheck disable=SC1091
@@ -25,7 +26,7 @@ echo "==> Building MiSTer_Zaparoo..."
 ./docker-build.sh
 
 echo "==> Backing up remote binary..."
-ssh_cmd "[ -f $REMOTE_PATH ] && mv $REMOTE_PATH ${REMOTE_PATH}.bak || true"
+ssh_cmd "mkdir -p $REMOTE_DIR; [ -f $REMOTE_PATH ] && mv $REMOTE_PATH ${REMOTE_PATH}.bak || true"
 
 echo "==> Copying new binary..."
 scp_cmd "$BINARY" "root@$MISTER_IP:$REMOTE_PATH"
