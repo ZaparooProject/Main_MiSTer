@@ -2212,6 +2212,12 @@ static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int 
 		}
 		else if (video_fb_state())
 		{
+			if (bnum == BTN_OSD)
+			{
+				uinp_send_key(KEY_MENU, press);
+				return;
+			}
+
 			switch (mask)
 			{
 			case JOY_RIGHT:
@@ -2252,6 +2258,14 @@ static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int 
 
 			case JOY_R:
 				uinp_send_key(KEY_PAGEDOWN, press);
+				break;
+
+			case JOY_L2:
+				uinp_send_key(KEY_F1, press);
+				break;
+
+			case JOY_R2:
+				uinp_send_key(KEY_BACKSPACE, press);
 				break;
 			}
 		}
