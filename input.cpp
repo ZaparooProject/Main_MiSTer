@@ -2212,9 +2212,10 @@ static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int 
 		}
 		else if (video_fb_state())
 		{
-			if (bnum == BTN_OSD)
+			uint16_t zaparoo_key = zaparoo_fb_terminal_key(mask, bnum == BTN_OSD);
+			if (zaparoo_key)
 			{
-				uinp_send_key(KEY_MENU, press);
+				uinp_send_key(zaparoo_key, press);
 				return;
 			}
 
@@ -2260,13 +2261,6 @@ static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int 
 				uinp_send_key(KEY_PAGEDOWN, press);
 				break;
 
-			case JOY_L2:
-				uinp_send_key(KEY_F1, press);
-				break;
-
-			case JOY_R2:
-				uinp_send_key(KEY_BACKSPACE, press);
-				break;
 			}
 		}
 		else if(jnum)

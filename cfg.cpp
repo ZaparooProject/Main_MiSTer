@@ -14,6 +14,7 @@
 #include "user_io.h"
 #include "video.h"
 #include "support/arcade/mra_loader.h"
+#include "support/zaparoo/zaparoo.h"
 
 cfg_t cfg;
 static FILE *orig_stdout = NULL;
@@ -577,6 +578,7 @@ const char* cfg_get_label(uint8_t alt)
 void cfg_parse()
 {
 	memset(&cfg, 0, sizeof(cfg));
+	zaparoo_cfg_defaults();
 	cfg.csync = 1;
 	cfg.bootscreen = 1;
 	cfg.fb_terminal = 1;
@@ -601,7 +603,6 @@ void cfg_parse()
 	cfg_error_count = 0;
 	strcpy(cfg.autofire_rates, "10,15,30");
 	strcpy(cfg.screenshot_image_format, "png");
-	cfg.recents = 1;
 
 	ini_parse(altcfg(), video_get_core_mode_name(1));
 	if (has_video_sections && !using_video_section)
