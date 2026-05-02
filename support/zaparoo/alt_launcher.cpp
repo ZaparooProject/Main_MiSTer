@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include "cfg.h"
@@ -19,9 +20,9 @@ static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
-static const int s_vt = 6;
-static const char s_tty[] = "tty6";
-static const char s_tty_path[] = "/dev/tty6";
+static const int s_vt = 2;
+static const char s_tty[] = "tty2";
+static const char s_tty_path[] = "/dev/tty2";
 
 static void clear_launcher_tty(void)
 {
@@ -34,9 +35,64 @@ static void clear_launcher_tty(void)
 	}
 }
 
+static void reset_launcher_tty(void)
+{
+	int tty_fd = open(s_tty_path, O_RDWR | O_NOCTTY | O_CLOEXEC);
+	if (tty_fd >= 0)
+	{
+		struct termios tio;
+		if (!tcgetattr(tty_fd, &tio))
+		{
+			tio.c_iflag |= BRKINT | ICRNL | IXON | IMAXBEL;
+			tio.c_iflag &= ~(IGNBRK | INLCR | IGNCR | IXOFF);
+			tio.c_oflag |= OPOST | ONLCR;
+			tio.c_lflag |= ISIG | ICANON | ECHO | ECHOE | ECHOK | IEXTEN;
+			tio.c_lflag &= ~(NOFLSH | TOSTOP);
+			tio.c_cflag |= CREAD;
+			tio.c_cc[VMIN] = 1;
+			tio.c_cc[VTIME] = 0;
+			tcsetattr(tty_fd, TCSANOW, &tio);
+		}
+
+		static const char reset[] = "\033[0m\033[?25h\033[37m\033[40m\033[2J\033[H";
+		if (write(tty_fd, reset, sizeof(reset) - 1) < 0) {}
+		close(tty_fd);
+	}
+}
+
+static bool launcher_tty_ready(pid_t pid)
+{
+	char fd_path[64];
+	char target[128];
+	for (int fd = 0; fd < 3; fd++)
+	{
+		snprintf(fd_path, sizeof(fd_path), "/proc/%d/fd/%d", pid, fd);
+		ssize_t len = readlink(fd_path, target, sizeof(target) - 1);
+		if (len > 0)
+		{
+			target[len] = 0;
+			if (!strcmp(target, s_tty_path))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static void wait_launcher_tty_ready(pid_t pid)
+{
+	for (int i = 0; i < 100; i++)
+	{
+		if (launcher_tty_ready(pid))
+			return;
+		usleep(10000);
+	}
+}
+
 static void return_to_normal_mode(void)
 {
 	user_io_osd_key_enable(1);
+	reset_launcher_tty();
 	video_menu_bg(user_io_status_get("[3:1]"));
 	video_fb_enable(0);
 	s_respawn_timer = 0;
@@ -102,8 +158,7 @@ static void spawn(void)
 		_exit(1);
 	}
 
-	// Give agetty time to grab s_tty before chvt switches to it.
-	usleep(100000);
+	wait_launcher_tty_ready(s_pid);
 	video_chvt(s_vt);
 	video_fb_enable(1);
 }

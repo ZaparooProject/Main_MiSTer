@@ -88,8 +88,11 @@ int main(int argc, char *argv[])
 		frame_timer();
 		input_poll(0);
 		alt_launcher_poll();
-		HandleUI();
-		OsdUpdate();
+		if (!alt_launcher_active())
+		{
+			HandleUI();
+			OsdUpdate();
+		}
 	}
 #endif
 	return 0;
