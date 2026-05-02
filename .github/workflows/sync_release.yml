@@ -1,6 +1,6 @@
 # Copyright (c) 2020 José Manuel Barroso Galindo <theypsilon@gmail.com>
 # Adapted from https://github.com/MiSTer-DB9/Main_MiSTer
-name: Sync + Release
+name: Sync + Stable Release
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,7 +28,6 @@ jobs:
         run: bash .github/sync_upstream.sh
 
       - name: Cache ARM toolchain
-        if: steps.sync.outputs.changed == 'true'
         uses: actions/cache@v4
         with:
           path: gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf
@@ -38,8 +37,8 @@ jobs:
         if: steps.sync.outputs.changed == 'true'
         run: git push origin master
 
-      - name: Build and release
-        if: steps.sync.outputs.changed == 'true'
+      - name: Build stable release
         run: bash .github/build_release.sh
         env:
           GH_TOKEN: ${{ github.token }}
+          SKIP_EXISTING_RELEASE: true

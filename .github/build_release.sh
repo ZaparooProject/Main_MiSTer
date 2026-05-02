@@ -2,26 +2,33 @@
 # Copyright (c) 2020 José Manuel Barroso Galindo <theypsilon@gmail.com>
 # Adapted from https://github.com/MiSTer-DB9/Main_MiSTer
 #
-# Build MiSTer binary and publish a GitHub Release.
+# Build MiSTer binary from the latest upstream stable release and publish it.
 # Requires GH_TOKEN in environment.
 
 set -euo pipefail
 
-# Use the toolchain script's defaults; ignore any inherited runner env.
-MISTER_GCC_INSTALL_DIR=""
-MISTER_GCC_VER=""
-MISTER_GCC_HOST_ARCH=""
-source setup_default_toolchain.sh
-make PRJ=MiSTer_Zaparoo
+METADATA_FILE=$(mktemp)
+STABLE_BUILD_METADATA_FILE="${METADATA_FILE}" STABLE_BUILD_METADATA_ONLY=true ./stable-build.sh
 
-RELEASE_TAG="MiSTer_Zaparoo_$(date -u +%Y%m%d)"
+# shellcheck disable=SC1090
+source "${METADATA_FILE}"
+RELEASE_TAG="MiSTer_Zaparoo_${STABLE_DATE}"
+
+if [ "${SKIP_EXISTING_RELEASE:-false}" = "true" ] && gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+    echo "Release ${RELEASE_TAG} already exists; skipping."
+    exit 0
+fi
+
+STABLE_BUILD_METADATA_FILE="${METADATA_FILE}" STABLE_BUILD_STABLE_COMMIT="${STABLE_COMMIT}" ./stable-build.sh
+
+# shellcheck disable=SC1090
+source "${METADATA_FILE}"
 
 # Last build of the day wins.
 gh release delete "${RELEASE_TAG}" --cleanup-tag --yes 2>/dev/null || true
 
-SHORT_SHA=$(git rev-parse --short HEAD)
 gh release create "${RELEASE_TAG}" \
     --title "${RELEASE_TAG}" \
-    --notes "Automated build from commit ${SHORT_SHA}" \
+    --notes "Automated build from upstream ${STABLE_NAME} with Zaparoo commit ${FORK_SHORT_SHA}" \
     "bin/MiSTer_Zaparoo" \
     "bin/MiSTer_Zaparoo.elf"
