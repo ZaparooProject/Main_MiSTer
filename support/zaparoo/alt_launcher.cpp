@@ -151,7 +151,6 @@ static void spawn(void)
 		cpu_set_t set;
 		CPU_ZERO(&set);
 		CPU_SET(0, &set);
-		CPU_SET(1, &set);
 		sched_setaffinity(0, sizeof(set), &set);
 		setsid();
 		execl("/sbin/agetty", "/sbin/agetty", "-a", "root", "-l",

@@ -9,7 +9,6 @@
 #include "osd.h"
 #include "profiling.h"
 #include "support/zaparoo/alt_launcher.h"
-#include "support/zaparoo/loop_throttle.h"
 
 static cothread_t co_scheduler = nullptr;
 static cothread_t co_poll = nullptr;
@@ -65,7 +64,6 @@ static void scheduler_schedule(void)
 	{
 		co_last = co_ui;
 		co_switch(co_ui);
-		zaparoo_loop_throttle();
 	}
 	else
 	{
