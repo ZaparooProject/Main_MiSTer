@@ -49,6 +49,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "osd.h"
 #include "hardware.h"
 #include "menu.h"
+#include "support/zaparoo/alt_launcher.h"
 #include "user_io.h"
 #include "debug.h"
 #include "fpga_io.h"
@@ -2800,6 +2801,13 @@ void HandleUI(void)
 				if (!menusub) firstmenu = 0;
 				adjvisible = 0;
 
+				if (alt_launcher_active())
+				{
+					menumask |= (1ULL << ALT_LAUNCHER_MENUSUB);
+					MenuWrite(n++, " Launcher", menusub == ALT_LAUNCHER_MENUSUB, 0);
+					MenuWrite(n++);
+				}
+
 				MenuWrite(n++, " Core                      \x16", menusub == 0, 0);
 				MenuWrite(n++);
 
@@ -3040,6 +3048,10 @@ void HandleUI(void)
 					p = s + 5 - off;
 					MenuWrite(cr, p, 1, 0);
 				}
+				break;
+
+			case ALT_LAUNCHER_MENUSUB:
+				reboot_req = 1;
 				break;
 
 			default:
