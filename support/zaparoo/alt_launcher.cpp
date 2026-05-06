@@ -19,12 +19,34 @@ static pid_t s_pid = 0;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
 static unsigned long s_native_status_timer = 0;
+static unsigned long s_native_fb_mode_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
 static bool s_native_crt = false;
 static const int s_vt = 2;
 static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
+static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
+
+static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int stride, bool log = true)
+{
+	FILE *fp = fopen(s_fb_mode_path, "wt");
+	if (!fp)
+	{
+		printf("alt_launcher: unable to set fb mode: %s\n", strerror(errno));
+		return;
+	}
+
+	fprintf(fp, "%d %d %d %d %d\n", fmt, rb, width, height, stride);
+	fclose(fp);
+	if (log)
+		printf("alt_launcher: fb mode set to %dx%d fmt=%d stride=%d\n", width, height, fmt, stride);
+}
+
+static void set_native_crt_fb_mode(bool log = true)
+{
+	set_launcher_fb_mode(565, 1, 384, 224, 768, log);
+}
 
 static void clear_launcher_tty(void)
 {
@@ -96,16 +118,21 @@ static void disable_native_crt_path(void)
 	user_io_status_set("[9]", 0);
 	video_fb_enable(0);
 	set_vga_fb(0);
+	set_launcher_fb_mode(8888, 1, 960, 720, 3840);
 	s_native_status_timer = 0;
+	s_native_fb_mode_timer = 0;
 }
 
 static void enable_native_crt_path(void)
 {
 	set_vga_fb(0);
 	video_fb_enable(0);
+	set_native_crt_fb_mode();
 	user_io_status_set("[9]", 1);
 	s_native_status_timer = GetTimer(500);
 	if (!s_native_status_timer) s_native_status_timer = 1;
+	s_native_fb_mode_timer = GetTimer(1000);
+	if (!s_native_fb_mode_timer) s_native_fb_mode_timer = 1;
 }
 
 static void return_to_normal_mode(void)
@@ -199,7 +226,9 @@ static void spawn(void)
 	if (!s_native_crt)
 		video_fb_enable(1);
 	else
+	{
 		user_io_status_set("[9]", 1);
+	}
 }
 
 bool alt_launcher_active(void)
@@ -226,6 +255,12 @@ void alt_launcher_poll(void)
 			user_io_status_set("[9]", 1);
 			s_native_status_timer = GetTimer(500);
 			if (!s_native_status_timer) s_native_status_timer = 1;
+		}
+
+		if (s_native_crt && s_native_fb_mode_timer && CheckTimer(s_native_fb_mode_timer))
+		{
+			set_native_crt_fb_mode();
+			s_native_fb_mode_timer = 0;
 		}
 
 		int status;
