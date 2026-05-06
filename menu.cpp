@@ -2783,6 +2783,7 @@ void HandleUI(void)
 			helptext_idx = 0;
 			reboot_req = 0;
 
+			if (parentstate != MENU_COMMON1 && !menusub && alt_launcher_configured()) menusub = ALT_LAUNCHER_MENUSUB;
 			OsdSetTitle("System", 0);
 			menustate = MENU_COMMON2;
 			parentstate = MENU_COMMON1;
@@ -2796,11 +2797,10 @@ void HandleUI(void)
 				if (!menusub) firstmenu = 0;
 				adjvisible = 0;
 
-				if (alt_launcher_active())
+				if (alt_launcher_configured())
 				{
 					menumask |= (1ULL << ALT_LAUNCHER_MENUSUB);
 					MenuWrite(n++, " Launcher", menusub == ALT_LAUNCHER_MENUSUB, 0);
-					MenuWrite(n++);
 				}
 
 				MenuWrite(n++, " Core                      \x16", menusub == 0, 0);
