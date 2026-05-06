@@ -137,6 +137,7 @@ static const ini_var_t ini_vars[] =
 	{ "AUTOFIRE_ON_DIRECTIONS", (void *)(&(cfg.autofire_on_directions)), UINT8, 0, 1 },
 	{ "SCREENSHOT_IMAGE_FORMAT", (void *)(&(cfg.screenshot_image_format)), STRING, 0, sizeof(cfg.screenshot_image_format) - 1 },
 	{ "ALT_LAUNCHER", (void*)(&(cfg.alt_launcher)), STRING, 0, sizeof(cfg.alt_launcher) - 1 },
+	{ "enable_crt_mode", (void*)(&(cfg.enable_crt_mode)), UINT8, 0, 1 },
 
 };
 

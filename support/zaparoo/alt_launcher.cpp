@@ -18,6 +18,7 @@
 static pid_t s_pid = 0;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
+static unsigned long s_native_status_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
 static const int s_vt = 2;
@@ -89,12 +90,29 @@ static void wait_launcher_tty_ready(pid_t pid)
 	}
 }
 
+static void disable_native_crt_path(void)
+{
+	user_io_status_set("[9]", 0);
+	video_fb_enable(0);
+	set_vga_fb(0);
+	s_native_status_timer = 0;
+}
+
+static void enable_native_crt_path(void)
+{
+	set_vga_fb(0);
+	video_fb_enable(0);
+	user_io_status_set("[9]", 1);
+	s_native_status_timer = GetTimer(500);
+	if (!s_native_status_timer) s_native_status_timer = 1;
+}
+
 static void return_to_normal_mode(void)
 {
 	user_io_osd_key_enable(1);
 	reset_launcher_tty();
 	video_menu_bg(user_io_status_get("[3:1]"));
-	video_fb_enable(0);
+	disable_native_crt_path();
 	s_respawn_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = true;
@@ -135,13 +153,24 @@ static void spawn(void)
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 
+	printf("alt_launcher: enable_crt_mode=%d\n", cfg.enable_crt_mode);
+	if (cfg.enable_crt_mode)
+	{
+		enable_native_crt_path();
+		printf("alt_launcher: native CRT path enabled\n");
+	}
+	else
+	{
+		printf("alt_launcher: HPS framebuffer path enabled\n");
+	}
+
 	s_pid = fork();
 	if (s_pid < 0)
 	{
 		printf("alt_launcher: fork failed: %s\n", strerror(errno));
 		s_pid = 0;
 		user_io_osd_key_enable(1);
-		video_fb_enable(0);
+		disable_native_crt_path();
 		return;
 	}
 	printf("alt_launcher: spawned pid=%d path=%s\n", s_pid, path);
@@ -161,7 +190,10 @@ static void spawn(void)
 
 	wait_launcher_tty_ready(s_pid);
 	video_chvt(s_vt);
-	video_fb_enable(1);
+	if (!cfg.enable_crt_mode)
+		video_fb_enable(1);
+	else
+		user_io_status_set("[9]", 1);
 }
 
 bool alt_launcher_active(void)
@@ -182,6 +214,13 @@ void alt_launcher_poll(void)
 {
 	if (s_pid)
 	{
+		if (cfg.enable_crt_mode && s_native_status_timer && CheckTimer(s_native_status_timer))
+		{
+			user_io_status_set("[9]", 1);
+			s_native_status_timer = GetTimer(500);
+			if (!s_native_status_timer) s_native_status_timer = 1;
+		}
+
 		int status;
 		if (waitpid(s_pid, &status, WNOHANG) == s_pid)
 		{
@@ -234,6 +273,7 @@ void alt_launcher_shutdown(void)
 	if (!s_pid)
 	{
 		reset_launcher_state();
+		disable_native_crt_path();
 		return;
 	}
 
@@ -264,4 +304,5 @@ void alt_launcher_shutdown(void)
 	}
 
 	reset_launcher_state();
+	disable_native_crt_path();
 }
