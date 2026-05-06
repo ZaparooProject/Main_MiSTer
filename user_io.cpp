@@ -211,18 +211,20 @@ char is_menu()
 	return (is_menu_type == 1);
 }
 
-static bool is_zaparoo_rbf()
+static const char *zaparoo_native_core_name = "3S-ARM";
+
+static bool is_zaparoo_native_core()
 {
-	const char *name = get_rbf_name();
-	return name[0] && !strncasecmp(name, "Zaparoo", 7);
+	return !strcasecmp(user_io_get_core_name(1), zaparoo_native_core_name) ||
+	       !strcasecmp(user_io_get_core_name(0), zaparoo_native_core_name);
 }
 
 static void zaparoo_alt_launcher_init_for_core()
 {
-	if (cfg.enable_crt_mode && cfg.alt_launcher[0] && cfg.fb_terminal && is_zaparoo_rbf())
+	if (cfg.alt_launcher[0] && cfg.fb_terminal && is_zaparoo_native_core())
 	{
-		printf("alt_launcher: initializing for Zaparoo core %s\n", get_rbf_name());
-		alt_launcher_init();
+		printf("alt_launcher: initializing CRT mode for core %s\n", zaparoo_native_core_name);
+		alt_launcher_init(true);
 	}
 }
 

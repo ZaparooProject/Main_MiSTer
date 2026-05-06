@@ -21,6 +21,7 @@ static unsigned long s_respawn_timer = 0;
 static unsigned long s_native_status_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
+static bool s_native_crt = false;
 static const int s_vt = 2;
 static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
@@ -113,6 +114,7 @@ static void return_to_normal_mode(void)
 	reset_launcher_tty();
 	video_menu_bg(user_io_status_get("[3:1]"));
 	disable_native_crt_path();
+	s_native_crt = false;
 	s_respawn_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = true;
@@ -144,6 +146,9 @@ static void spawn(void)
 		"export LC_ALL=en_US.UTF-8\n"
 		"export HOME=/root\n"
 		"printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
+		"if [ \"$ALT_LAUNCHER_CRT\" = \"1\" ]; then\n"
+		"	exec \"$ALT_LAUNCHER_PATH\" --crt\n"
+		"fi\n"
 		"exec \"$ALT_LAUNCHER_PATH\"\n";
 
 	unlink("/tmp/alt_launcher");
@@ -153,8 +158,8 @@ static void spawn(void)
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 
-	printf("alt_launcher: enable_crt_mode=%d\n", cfg.enable_crt_mode);
-	if (cfg.enable_crt_mode)
+	printf("alt_launcher: native_crt=%d\n", s_native_crt);
+	if (s_native_crt)
 	{
 		enable_native_crt_path();
 		printf("alt_launcher: native CRT path enabled\n");
@@ -177,6 +182,7 @@ static void spawn(void)
 	if (!s_pid)
 	{
 		setenv("ALT_LAUNCHER_PATH", path, 1);
+		setenv("ALT_LAUNCHER_CRT", s_native_crt ? "1" : "0", 1);
 		cpu_set_t set;
 		CPU_ZERO(&set);
 		CPU_SET(0, &set);
@@ -190,7 +196,7 @@ static void spawn(void)
 
 	wait_launcher_tty_ready(s_pid);
 	video_chvt(s_vt);
-	if (!cfg.enable_crt_mode)
+	if (!s_native_crt)
 		video_fb_enable(1);
 	else
 		user_io_status_set("[9]", 1);
@@ -201,12 +207,13 @@ bool alt_launcher_active(void)
 	return s_pid != 0;
 }
 
-void alt_launcher_init(void)
+void alt_launcher_init(bool native_crt)
 {
 	if (!cfg.alt_launcher[0] || !cfg.fb_terminal || s_pid || s_gave_up)
 		return;
 	s_crash_count = 0;
 	s_respawn_timer = 0;
+	s_native_crt = native_crt;
 	s_init_pending = true;
 }
 
@@ -214,7 +221,7 @@ void alt_launcher_poll(void)
 {
 	if (s_pid)
 	{
-		if (cfg.enable_crt_mode && s_native_status_timer && CheckTimer(s_native_status_timer))
+		if (s_native_crt && s_native_status_timer && CheckTimer(s_native_status_timer))
 		{
 			user_io_status_set("[9]", 1);
 			s_native_status_timer = GetTimer(500);
@@ -273,6 +280,7 @@ void alt_launcher_shutdown(void)
 	if (!s_pid)
 	{
 		reset_launcher_state();
+		s_native_crt = false;
 		disable_native_crt_path();
 		return;
 	}
@@ -304,5 +312,6 @@ void alt_launcher_shutdown(void)
 	}
 
 	reset_launcher_state();
+	s_native_crt = false;
 	disable_native_crt_path();
 }

@@ -104,7 +104,6 @@ typedef struct {
 	uint8_t autofire_on_directions;
 	char screenshot_image_format[16];
 	char alt_launcher[1024];
-	uint8_t enable_crt_mode;
 
 } cfg_t;
 
