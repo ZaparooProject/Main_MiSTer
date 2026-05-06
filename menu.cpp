@@ -219,12 +219,7 @@ enum MENU
 	// Atari 8bit cartridge type selection
 	MENU_ATARI8BIT_CART1,
 	MENU_ATARI8BIT_CART2,
-
-	MENU_PICKER_SELECTED,
 };
-
-#define MENU_PICKER_ITEMS_DIR "/tmp/PICKERITEMS"
-#define MENU_PICKER_SELECTED_FILE "/tmp/PICKERSELECTED"
 
 static uint32_t menustate = MENU_NONE1;
 static uint32_t parentstate;
@@ -7580,13 +7575,6 @@ void HandleUI(void)
 		}
 		break;
 
-	case MENU_PICKER_SELECTED:
-		memcpy(Selected_tmp, selPath, sizeof(Selected_tmp));
-		MakeFile(MENU_PICKER_SELECTED_FILE, Selected_tmp);
-		OsdClear();
-		menustate = MENU_NONE1;
-		break;
-
 		/******************************************************************/
 		/* we should never come here                                      */
 		/******************************************************************/
@@ -8028,12 +8016,4 @@ void ProgressMessage(const char* title, const char* text, int current, int max)
 
 		InfoMessage(progress_buf, 2000, title);
 	}
-}
-
-void menu_show_picker()
-{
-	FileCreatePath(MENU_PICKER_ITEMS_DIR);
-	strncpy(Selected_tmp, MENU_PICKER_ITEMS_DIR, sizeof(Selected_tmp) - 1);
-	OsdEnable(DISABLE_KEYBOARD);
-	SelectFile(Selected_tmp, "TXT", SCANO_TXT, MENU_PICKER_SELECTED, MENU_NONE1);
 }
