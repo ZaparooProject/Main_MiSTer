@@ -42,3 +42,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SKIP_EXISTING_RELEASE: true
+
+      - name: Build unstable release
+        run: bash .github/build_unstable_release.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SKIP_EXISTING_RELEASE: true
