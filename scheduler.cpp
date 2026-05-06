@@ -47,11 +47,8 @@ static void scheduler_co_ui(void)
 	{
 		{
 			SPIKE_SCOPE("co_ui", 1000);
-			if (!alt_launcher_active())
-			{
-				HandleUI();
-				OsdUpdate();
-			}
+			HandleUI();
+			OsdUpdate();
 		}
 
 		scheduler_yield();
