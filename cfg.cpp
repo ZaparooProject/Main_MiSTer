@@ -14,7 +14,7 @@
 #include "user_io.h"
 #include "video.h"
 #include "support/arcade/mra_loader.h"
-#include "support/zaparoo/zaparoo.h"
+#include "support/zaparoo/alt_launcher.h"
 
 cfg_t cfg;
 static FILE *orig_stdout = NULL;
@@ -578,7 +578,7 @@ const char* cfg_get_label(uint8_t alt)
 void cfg_parse()
 {
 	memset(&cfg, 0, sizeof(cfg));
-	zaparoo_cfg_defaults();
+	alt_launcher_cfg_defaults();
 	cfg.csync = 1;
 	cfg.bootscreen = 1;
 	cfg.fb_terminal = 1;

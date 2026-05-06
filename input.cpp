@@ -35,7 +35,7 @@
 #include "str_util.h"
 #include "frame_timer.h"
 #include "scaler.h"
-#include "support/zaparoo/zaparoo.h"
+#include "support/zaparoo/alt_launcher.h"
 
 #define NUMDEV 30
 #define UINPUT_NAME "MiSTer virtual input"
@@ -2212,10 +2212,10 @@ static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int 
 		}
 		else if (video_fb_state())
 		{
-			uint16_t zaparoo_key = zaparoo_fb_terminal_key(mask, bnum == BTN_OSD);
-			if (zaparoo_key)
+			uint16_t alt_key = alt_launcher_fb_terminal_key(mask, bnum == BTN_OSD);
+			if (alt_key)
 			{
-				uinp_send_key(zaparoo_key, press);
+				uinp_send_key(alt_key, press);
 				return;
 			}
 
@@ -2260,7 +2260,6 @@ static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int 
 			case JOY_R:
 				uinp_send_key(KEY_PAGEDOWN, press);
 				break;
-
 			}
 		}
 		else if(jnum)
@@ -5927,7 +5926,6 @@ int input_test(int getchar)
 						else if (!strcmp(cmd + 7, "unmute")) set_volume(0x80);
 						else if (cmd[7] >= '0' && cmd[7] <= '7') set_volume(0x40 - 0x30 + cmd[7]);
 					}
-					else if (zaparoo_handle_input_cmd(cmd)) {}
 				}
 			}
 

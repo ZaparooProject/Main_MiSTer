@@ -49,6 +49,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "osd.h"
 #include "hardware.h"
 #include "menu.h"
+#include "support/zaparoo/alt_launcher.h"
 #include "user_io.h"
 #include "debug.h"
 #include "fpga_io.h"
@@ -218,12 +219,7 @@ enum MENU
 	// Atari 8bit cartridge type selection
 	MENU_ATARI8BIT_CART1,
 	MENU_ATARI8BIT_CART2,
-
-	MENU_PICKER_SELECTED,
 };
-
-#define MENU_PICKER_ITEMS_DIR "/tmp/PICKERITEMS"
-#define MENU_PICKER_SELECTED_FILE "/tmp/PICKERSELECTED"
 
 static uint32_t menustate = MENU_NONE1;
 static uint32_t parentstate;
@@ -2787,6 +2783,7 @@ void HandleUI(void)
 			helptext_idx = 0;
 			reboot_req = 0;
 
+			if (parentstate != MENU_COMMON1 && !menusub && alt_launcher_configured()) menusub = ALT_LAUNCHER_MENUSUB;
 			OsdSetTitle("System", 0);
 			menustate = MENU_COMMON2;
 			parentstate = MENU_COMMON1;
@@ -2799,6 +2796,12 @@ void HandleUI(void)
 
 				if (!menusub) firstmenu = 0;
 				adjvisible = 0;
+
+				if (alt_launcher_configured())
+				{
+					menumask |= (1ULL << ALT_LAUNCHER_MENUSUB);
+					MenuWrite(n++, " Launcher", menusub == ALT_LAUNCHER_MENUSUB, 0);
+				}
 
 				MenuWrite(n++, " Core                      \x16", menusub == 0, 0);
 				MenuWrite(n++);
@@ -3040,6 +3043,10 @@ void HandleUI(void)
 					p = s + 5 - off;
 					MenuWrite(cr, p, 1, 0);
 				}
+				break;
+
+			case ALT_LAUNCHER_MENUSUB:
+				reboot_req = 1;
 				break;
 
 			default:
@@ -7568,13 +7575,6 @@ void HandleUI(void)
 		}
 		break;
 
-	case MENU_PICKER_SELECTED:
-		memcpy(Selected_tmp, selPath, sizeof(Selected_tmp));
-		MakeFile(MENU_PICKER_SELECTED_FILE, Selected_tmp);
-		OsdClear();
-		menustate = MENU_NONE1;
-		break;
-
 		/******************************************************************/
 		/* we should never come here                                      */
 		/******************************************************************/
@@ -8016,12 +8016,4 @@ void ProgressMessage(const char* title, const char* text, int current, int max)
 
 		InfoMessage(progress_buf, 2000, title);
 	}
-}
-
-void menu_show_picker()
-{
-	FileCreatePath(MENU_PICKER_ITEMS_DIR);
-	strncpy(Selected_tmp, MENU_PICKER_ITEMS_DIR, sizeof(Selected_tmp) - 1);
-	OsdEnable(DISABLE_KEYBOARD);
-	SelectFile(Selected_tmp, "TXT", SCANO_TXT, MENU_PICKER_SELECTED, MENU_NONE1);
 }
