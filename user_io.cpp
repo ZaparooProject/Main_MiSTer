@@ -211,6 +211,21 @@ char is_menu()
 	return (is_menu_type == 1);
 }
 
+static bool is_zaparoo_rbf()
+{
+	const char *name = get_rbf_name();
+	return name[0] && !strncasecmp(name, "Zaparoo", 7);
+}
+
+static void zaparoo_alt_launcher_init_for_core()
+{
+	if (cfg.enable_crt_mode && cfg.alt_launcher[0] && cfg.fb_terminal && is_zaparoo_rbf())
+	{
+		printf("alt_launcher: initializing for Zaparoo core %s\n", get_rbf_name());
+		alt_launcher_init();
+	}
+}
+
 static int is_x86_type = 0;
 char is_x86()
 {
@@ -1489,6 +1504,7 @@ void user_io_init(const char *path, const char *xml)
 	{
 	case CORE_TYPE_UNKNOWN:
 		printf("Unable to identify core (%x)!\n", core_type);
+		zaparoo_alt_launcher_init_for_core();
 		break;
 
 	case CORE_TYPE_SHARPMZ:
@@ -1536,6 +1552,7 @@ void user_io_init(const char *path, const char *xml)
 			}
 			else
 			{
+				zaparoo_alt_launcher_init_for_core();
 				if (xml && isXmlName(xml) == 1)
 				{
 					arcade_send_rom(xml);
