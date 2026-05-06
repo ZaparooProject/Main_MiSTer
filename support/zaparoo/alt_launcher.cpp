@@ -8,12 +8,37 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+#include <linux/input.h>
 #include <sys/wait.h>
 #include "cfg.h"
 #include "file_io.h"
 #include "hardware.h"
 #include "user_io.h"
 #include "video.h"
+
+void alt_launcher_cfg_defaults(void)
+{
+	cfg.recents = 1;
+}
+
+uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button)
+{
+	if (!cfg.alt_launcher[0])
+		return 0;
+
+	if (osd_button)
+		return KEY_MENU;
+
+	switch (mask)
+	{
+	case JOY_L2:
+		return KEY_F1;
+	case JOY_R2:
+		return KEY_BACKSPACE;
+	}
+
+	return 0;
+}
 
 static pid_t s_pid = 0;
 static int s_crash_count = 0;

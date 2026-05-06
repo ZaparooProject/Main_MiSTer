@@ -31,7 +31,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "input.h"
 #include "frame_timer.h"
 #include "fpga_io.h"
-#include "support/zaparoo/alt_launcher.h"
 #include "scheduler.h"
 #include "osd.h"
 #include "offload.h"
@@ -87,12 +86,8 @@ int main(int argc, char *argv[])
 		user_io_poll();
 		frame_timer();
 		input_poll(0);
-		alt_launcher_poll();
-		if (!alt_launcher_active())
-		{
-			HandleUI();
-			OsdUpdate();
-		}
+		HandleUI();
+		OsdUpdate();
 	}
 #endif
 	return 0;
