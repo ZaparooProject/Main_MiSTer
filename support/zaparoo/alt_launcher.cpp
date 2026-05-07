@@ -13,6 +13,7 @@
 #include "cfg.h"
 #include "file_io.h"
 #include "hardware.h"
+#include "input.h"
 #include "user_io.h"
 #include "video.h"
 
@@ -257,6 +258,7 @@ static void spawn(void)
 		video_fb_enable(1);
 	else
 	{
+		input_switch(0);
 		user_io_status_set("[9]", 1);
 	}
 }
