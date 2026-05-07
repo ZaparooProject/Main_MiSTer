@@ -74,7 +74,7 @@ trap cleanup EXIT
 
 echo "==> Building from upstream ${UNSTABLE_NAME} with Zaparoo ${FORK_SHORT_SHA}"
 git worktree add --detach "${TMP_WORKTREE}" "${UNSTABLE_COMMIT}" >/dev/null
-git -C "${TMP_WORKTREE}" merge --no-edit -Xignore-all-space "${FORK_HEAD}"
+git -C "${TMP_WORKTREE}" merge --no-commit --no-ff -Xignore-all-space "${FORK_HEAD}"
 
 "${TMP_WORKTREE}/docker-build.sh" "$@"
 
