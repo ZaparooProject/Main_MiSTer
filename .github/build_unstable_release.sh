@@ -6,6 +6,7 @@
 set -euo pipefail
 
 RELEASE_TAG="${UNSTABLE_RELEASE_TAG:-MiSTer_Zaparoo_unstable}"
+RELEASE_REPO="${RELEASE_REPO:-${GITHUB_REPOSITORY:-ZaparooProject/Main_MiSTer}}"
 
 METADATA_FILE=$(mktemp)
 UNSTABLE_BUILD_METADATA_FILE="${METADATA_FILE}" UNSTABLE_BUILD_METADATA_ONLY=true ./unstable-build.sh
@@ -14,7 +15,7 @@ UNSTABLE_BUILD_METADATA_FILE="${METADATA_FILE}" UNSTABLE_BUILD_METADATA_ONLY=tru
 source "${METADATA_FILE}"
 
 if [ "${SKIP_EXISTING_RELEASE:-false}" = "true" ] && \
-   gh release view "${RELEASE_TAG}" 2>/dev/null | grep -q "${UNSTABLE_NAME}_${FORK_SHORT_SHA}"; then
+   gh release view "${RELEASE_TAG}" -R "${RELEASE_REPO}" 2>/dev/null | grep -q "${UNSTABLE_NAME}_${FORK_SHORT_SHA}"; then
     echo "Unstable release for ${UNSTABLE_NAME}+${FORK_SHORT_SHA} already published; skipping."
     exit 0
 fi
@@ -32,9 +33,10 @@ cp "bin/MiSTer_Zaparoo" "${ARTIFACT_BIN}"
 cp "bin/MiSTer_Zaparoo.elf" "${ARTIFACT_ELF}"
 
 # Rolling tag: replace the release on every successful build.
-gh release delete "${RELEASE_TAG}" --cleanup-tag --yes 2>/dev/null || true
+gh release delete "${RELEASE_TAG}" -R "${RELEASE_REPO}" --cleanup-tag --yes 2>/dev/null || true
 
 gh release create "${RELEASE_TAG}" \
+    -R "${RELEASE_REPO}" \
     --prerelease \
     --title "Zaparoo unstable @ ${UNSTABLE_NAME}" \
     --notes "Automated build from upstream master HEAD (${UNSTABLE_NAME}) with Zaparoo commit ${FORK_SHORT_SHA}.

@@ -50,7 +50,6 @@ fi
 UNSTABLE_SHORT_SHA=$(git rev-parse --short=8 "${UNSTABLE_COMMIT}")
 UNSTABLE_DATE=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y%m%d "${UNSTABLE_COMMIT}")
 UNSTABLE_NAME="MiSTer_unstable_${UNSTABLE_DATE}_${UNSTABLE_SHORT_SHA}"
-FORK_COMMITS=$(git rev-list --reverse --no-merges "${UPSTREAM_REF}..${FORK_HEAD}")
 
 if [ -n "${METADATA_FILE}" ]; then
     cat >"${METADATA_FILE}" <<EOF
@@ -75,10 +74,7 @@ trap cleanup EXIT
 
 echo "==> Building from upstream ${UNSTABLE_NAME} with Zaparoo ${FORK_SHORT_SHA}"
 git worktree add --detach "${TMP_WORKTREE}" "${UNSTABLE_COMMIT}" >/dev/null
-
-if [ -n "${FORK_COMMITS}" ]; then
-    git -C "${TMP_WORKTREE}" cherry-pick --no-commit ${FORK_COMMITS}
-fi
+git -C "${TMP_WORKTREE}" merge --no-edit -Xignore-all-space "${FORK_HEAD}"
 
 "${TMP_WORKTREE}/docker-build.sh" "$@"
 

@@ -156,6 +156,16 @@ static void enable_native_crt_path(void)
 	if (!s_native_fb_mode_timer) s_native_fb_mode_timer = 1;
 }
 
+static void wait_launcher_tty_ready(pid_t pid)
+{
+	for (int i = 0; i < 100; i++)
+	{
+		if (launcher_tty_ready(pid))
+			return;
+		usleep(10000);
+	}
+}
+
 static void return_to_normal_mode(void)
 {
 	user_io_osd_key_enable(1);
@@ -172,7 +182,6 @@ static void reset_launcher_state(void)
 {
 	s_pid = 0;
 	s_respawn_timer = 0;
-	s_tty_deadline = 0;
 	s_crash_count = 0;
 	s_gave_up = false;
 	s_init_pending = false;
@@ -242,13 +251,7 @@ static void spawn(void)
 		_exit(1);
 	}
 
-	s_tty_deadline = GetTimer(1000);
-	if (!s_tty_deadline) s_tty_deadline = 1;
-}
-
-static void finalize_spawn(void)
-{
-	s_tty_deadline = 0;
+	wait_launcher_tty_ready(s_pid);
 	video_chvt(s_vt);
 	if (!s_native_crt)
 		video_fb_enable(1);
@@ -294,7 +297,6 @@ void alt_launcher_poll(void)
 		if (waitpid(s_pid, &status, WNOHANG) == s_pid)
 		{
 			s_pid = 0;
-			s_tty_deadline = 0;
 			user_io_osd_key_enable(1);
 			bool exited = WIFEXITED(status);
 			int exit_status = exited ? WEXITSTATUS(status) : 0;
@@ -317,11 +319,7 @@ void alt_launcher_poll(void)
 				s_crash_count = 0;
 			s_respawn_timer = GetTimer(1000);
 			if (!s_respawn_timer) s_respawn_timer = 1;
-			return;
 		}
-
-		if (s_tty_deadline && (launcher_tty_ready(s_pid) || CheckTimer(s_tty_deadline)))
-			finalize_spawn();
 		return;
 	}
 
