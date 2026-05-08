@@ -77,7 +77,9 @@ static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int str
 
 static void set_native_crt_fb_mode(bool log = true)
 {
-	set_launcher_fb_mode(565, 1, 384, 224, 768, log);
+	// keep this around in case is useful
+	// set_launcher_fb_mode(565, 1, 384, 224, 768, log);
+	set_launcher_fb_mode(8888, 1, 320, 240, 1280, log);
 }
 
 static void clear_launcher_tty(void)
