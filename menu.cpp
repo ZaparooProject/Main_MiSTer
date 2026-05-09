@@ -1297,13 +1297,6 @@ void HandleUI(void)
 			}
 			break;
 
-		case KEY_F2:
-			if (alt_launcher_configured() && (is_menu() || zaparoo_is_native_core()))
-			{
-				alt_launcher_toggle_crt();
-			}
-			break;
-
 		case KEY_F11:
 			if (user_io_osd_is_visible() && (menustate != MENU_SCRIPTS1 || script_finished))
 			{
