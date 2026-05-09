@@ -4153,6 +4153,15 @@ void user_io_kbd(uint16_t key, int press)
 		PrintDirectory();
 	}
 	else
+	if (key == KEY_F2 && press == 1 && alt_launcher_configured() && (is_menu() || zaparoo_is_native_core()))
+	{
+		// Toggle the Zaparoo launcher between HDMI and native-CRT modes.
+		// Handled here (not in HandleUI) so it works while the launcher is
+		// running and the OSD is hidden — keys outside OSD never reach the
+		// menu_key queue, only the FPGA core path.
+		alt_launcher_toggle_crt();
+	}
+	else
 	{
 		if (key)
 		{
