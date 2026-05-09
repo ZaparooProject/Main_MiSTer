@@ -6707,6 +6707,7 @@ void HandleUI(void)
 		m = 0;
 		OsdSetTitle("System Settings", OSD_ARROW_LEFT);
 		menumask = 0x7F;
+		if (alt_launcher_configured()) menumask |= (1ULL << 7);
 
 		OsdWrite(m++);
 		sprintf(s, "       MiSTer v%s", version + 5);
@@ -6759,6 +6760,11 @@ void HandleUI(void)
 		OsdWrite(m++, " Define joystick buttons   \x16", menusub == 2);
 		OsdWrite(m++, " Scripts                   \x16", menusub == 3);
 		OsdWrite(m++, " Help                      \x16", menusub == 4);
+		if (alt_launcher_configured())
+		{
+			sprintf(s, " CRT mode: %-15s", alt_launcher_native_crt() ? "On" : "Off");
+			OsdWrite(m++, s, menusub == 7);
+		}
 		OsdWrite(m++, "");
 		cr = m;
 		OsdWrite(m++, " Reboot (hold \x16 cold reboot)", menusub == 5);
@@ -6843,6 +6849,14 @@ void HandleUI(void)
 
 			case 6:
 				menustate = MENU_NONE1;
+				break;
+
+			case 7:
+				if (alt_launcher_configured())
+				{
+					alt_launcher_toggle_crt();
+					menustate = MENU_SYSTEM1;
+				}
 				break;
 			}
 		}
