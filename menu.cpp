@@ -1567,7 +1567,13 @@ void HandleUI(void)
 			menustate = MENU_UNLOCK1;
 			osd_code_entry[0] = 0;
 		}
-		else if (menu || (is_menu() && !video_fb_state()) || (menustate == MENU_NONE2 && !mgl->done && mgl->state == 1))
+		// On the menu core without an alt launcher, the menu *is* the screen —
+		// keep auto-opening the OSD whenever fb_terminal is off. With an alt
+		// launcher running, that rule would re-open System Settings the moment
+		// the user closes it (in CRT mode video_fb_state is false), so the OSD
+		// could never actually close. Suppress the auto-open in that case;
+		// explicit F12/MENU presses still open and close it normally.
+		else if (menu || (is_menu() && !video_fb_state() && !alt_launcher_active()) || (menustate == MENU_NONE2 && !mgl->done && mgl->state == 1))
 		{
 			OsdSetSize(16);
 			menusub = 0;
