@@ -1535,6 +1535,7 @@ void user_io_init(const char *path, const char *xml)
 			}
 			else
 			{
+				zaparoo_alt_launcher_init_for_core();
 				if (xml && isXmlName(xml) == 1)
 				{
 					arcade_send_rom(xml);

@@ -2472,7 +2472,7 @@ static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int 
 			}
 			input_cb(&ev, 0, 0, true);
 		}
-		else if (video_fb_state())
+		else if (video_fb_state() || alt_launcher_active())
 		{
 			uint16_t alt_key = alt_launcher_fb_terminal_key(mask, bnum == BTN_OSD);
 			if (alt_key)

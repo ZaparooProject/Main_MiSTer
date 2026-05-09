@@ -13,6 +13,7 @@
 #include "cfg.h"
 #include "file_io.h"
 #include "hardware.h"
+#include "input.h"
 #include "user_io.h"
 #include "video.h"
 
@@ -48,11 +49,35 @@ uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button)
 static pid_t s_pid = 0;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
+static unsigned long s_native_status_timer = 0;
+static unsigned long s_native_fb_mode_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
+static bool s_native_crt = false;
 static const int s_vt = 2;
 static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
+static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
+
+static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int stride, bool log = true)
+{
+	FILE *fp = fopen(s_fb_mode_path, "wt");
+	if (!fp)
+	{
+		printf("alt_launcher: unable to set fb mode: %s\n", strerror(errno));
+		return;
+	}
+
+	fprintf(fp, "%d %d %d %d %d\n", fmt, rb, width, height, stride);
+	fclose(fp);
+	if (log)
+		printf("alt_launcher: fb mode set to %dx%d fmt=%d stride=%d\n", width, height, fmt, stride);
+}
+
+static void set_native_crt_fb_mode(bool log = true)
+{
+	set_launcher_fb_mode(8888, 1, 320, 240, 1280, log);
+}
 
 static void clear_launcher_tty(void)
 {
@@ -109,6 +134,28 @@ static bool launcher_tty_ready(pid_t pid)
 	return false;
 }
 
+static void disable_native_crt_path(void)
+{
+	user_io_status_set("[9]", 0);
+	video_fb_enable(0);
+	set_vga_fb(0);
+	set_launcher_fb_mode(8888, 1, 960, 720, 3840);
+	s_native_status_timer = 0;
+	s_native_fb_mode_timer = 0;
+}
+
+static void enable_native_crt_path(void)
+{
+	set_vga_fb(0);
+	video_fb_enable(0);
+	set_native_crt_fb_mode();
+	user_io_status_set("[9]", 1);
+	s_native_status_timer = GetTimer(500);
+	if (!s_native_status_timer) s_native_status_timer = 1;
+	s_native_fb_mode_timer = GetTimer(1000);
+	if (!s_native_fb_mode_timer) s_native_fb_mode_timer = 1;
+}
+
 static void wait_launcher_tty_ready(pid_t pid)
 {
 	for (int i = 0; i < 100; i++)
@@ -124,7 +171,9 @@ static void return_to_normal_mode(void)
 	user_io_osd_key_enable(1);
 	reset_launcher_tty();
 	video_menu_bg(user_io_status_get("[3:1]"));
-	video_fb_enable(0);
+	if (s_native_crt) disable_native_crt_path();
+	else video_fb_enable(0);
+	s_native_crt = false;
 	s_respawn_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = true;
@@ -156,6 +205,9 @@ static void spawn(void)
 		"export LC_ALL=en_US.UTF-8\n"
 		"export HOME=/root\n"
 		"printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
+		"if [ \"$ALT_LAUNCHER_CRT\" = \"1\" ]; then\n"
+		"	exec \"$ALT_LAUNCHER_PATH\" --crt\n"
+		"fi\n"
 		"exec \"$ALT_LAUNCHER_PATH\"\n";
 
 	unlink("/tmp/alt_launcher");
@@ -165,19 +217,32 @@ static void spawn(void)
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 
+	printf("alt_launcher: native_crt=%d\n", s_native_crt);
+	if (s_native_crt)
+	{
+		enable_native_crt_path();
+		printf("alt_launcher: native CRT path enabled\n");
+	}
+	else
+	{
+		printf("alt_launcher: HPS framebuffer path enabled\n");
+	}
+
 	s_pid = fork();
 	if (s_pid < 0)
 	{
 		printf("alt_launcher: fork failed: %s\n", strerror(errno));
 		s_pid = 0;
 		user_io_osd_key_enable(1);
-		video_fb_enable(0);
+		if (s_native_crt) disable_native_crt_path();
+		else video_fb_enable(0);
 		return;
 	}
 	printf("alt_launcher: spawned pid=%d path=%s\n", s_pid, path);
 	if (!s_pid)
 	{
 		setenv("ALT_LAUNCHER_PATH", path, 1);
+		setenv("ALT_LAUNCHER_CRT", s_native_crt ? "1" : "0", 1);
 		cpu_set_t set;
 		CPU_ZERO(&set);
 		CPU_SET(0, &set);
@@ -190,7 +255,13 @@ static void spawn(void)
 
 	wait_launcher_tty_ready(s_pid);
 	video_chvt(s_vt);
-	video_fb_enable(1);
+	if (!s_native_crt)
+		video_fb_enable(1);
+	else
+	{
+		input_switch(0);
+		user_io_status_set("[9]", 1);
+	}
 }
 
 bool alt_launcher_active(void)
@@ -198,12 +269,13 @@ bool alt_launcher_active(void)
 	return s_pid != 0;
 }
 
-void alt_launcher_init(void)
+void alt_launcher_init(bool native_crt)
 {
 	if (!cfg.alt_launcher[0] || !cfg.fb_terminal || s_pid || s_gave_up)
 		return;
 	s_crash_count = 0;
 	s_respawn_timer = 0;
+	s_native_crt = native_crt;
 	s_init_pending = true;
 }
 
@@ -211,6 +283,19 @@ void alt_launcher_poll(void)
 {
 	if (s_pid)
 	{
+		if (s_native_crt && s_native_status_timer && CheckTimer(s_native_status_timer))
+		{
+			user_io_status_set("[9]", 1);
+			s_native_status_timer = GetTimer(500);
+			if (!s_native_status_timer) s_native_status_timer = 1;
+		}
+
+		if (s_native_crt && s_native_fb_mode_timer && CheckTimer(s_native_fb_mode_timer))
+		{
+			set_native_crt_fb_mode();
+			s_native_fb_mode_timer = 0;
+		}
+
 		int status;
 		if (waitpid(s_pid, &status, WNOHANG) == s_pid)
 		{
@@ -263,6 +348,11 @@ void alt_launcher_shutdown(void)
 	if (!s_pid)
 	{
 		reset_launcher_state();
+		if (s_native_crt)
+		{
+			s_native_crt = false;
+			disable_native_crt_path();
+		}
 		return;
 	}
 
@@ -293,4 +383,30 @@ void alt_launcher_shutdown(void)
 	}
 
 	reset_launcher_state();
+	if (s_native_crt)
+	{
+		s_native_crt = false;
+		disable_native_crt_path();
+	}
+	else
+	{
+		video_fb_enable(0);
+	}
+}
+
+bool zaparoo_is_native_core(void)
+{
+	static const char *name = "Zaparoo Launcher";
+	return !strcasecmp(user_io_get_core_name(0), name) ||
+	       !strcasecmp(user_io_get_core_name(1), name);
+}
+
+void zaparoo_alt_launcher_init_for_core(void)
+{
+	if (cfg.alt_launcher[0] && cfg.fb_terminal && zaparoo_is_native_core())
+	{
+		printf("alt_launcher: initializing CRT mode for core '%s' '%s'\n",
+		       user_io_get_core_name(1), user_io_get_core_name(0));
+		alt_launcher_init(true);
+	}
 }
