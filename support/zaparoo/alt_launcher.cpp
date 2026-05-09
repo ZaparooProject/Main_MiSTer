@@ -269,6 +269,20 @@ bool alt_launcher_active(void)
 	return s_pid != 0;
 }
 
+void alt_launcher_toggle_crt(void)
+{
+	bool current_crt = alt_launcher_active() && s_native_crt;
+	bool target_crt  = !current_crt;
+
+	printf("alt_launcher: toggle CRT path %d -> %d\n", current_crt, target_crt);
+
+	// Shutdown drops status[9], releases the FB mode and restores HPS framebuffer
+	// state regardless of whether the launcher was running. After it returns we
+	// always have a clean slate to spawn the next launcher invocation.
+	alt_launcher_shutdown();
+	alt_launcher_init(target_crt);
+}
+
 void alt_launcher_init(bool native_crt)
 {
 	if (!cfg.alt_launcher[0] || !cfg.fb_terminal || s_pid || s_gave_up)
