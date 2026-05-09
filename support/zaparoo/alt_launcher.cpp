@@ -51,7 +51,6 @@ static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
 static unsigned long s_native_status_timer = 0;
 static unsigned long s_native_fb_mode_timer = 0;
-static unsigned long s_tty_deadline = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
 static bool s_native_crt = false;
@@ -77,8 +76,6 @@ static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int str
 
 static void set_native_crt_fb_mode(bool log = true)
 {
-	// keep this around in case is useful
-	// set_launcher_fb_mode(565, 1, 384, 224, 768, log);
 	set_launcher_fb_mode(8888, 1, 320, 240, 1280, log);
 }
 
@@ -174,7 +171,8 @@ static void return_to_normal_mode(void)
 	user_io_osd_key_enable(1);
 	reset_launcher_tty();
 	video_menu_bg(user_io_status_get("[3:1]"));
-	disable_native_crt_path();
+	if (s_native_crt) disable_native_crt_path();
+	else video_fb_enable(0);
 	s_native_crt = false;
 	s_respawn_timer = 0;
 	s_crash_count = 0;
@@ -236,7 +234,8 @@ static void spawn(void)
 		printf("alt_launcher: fork failed: %s\n", strerror(errno));
 		s_pid = 0;
 		user_io_osd_key_enable(1);
-		disable_native_crt_path();
+		if (s_native_crt) disable_native_crt_path();
+		else video_fb_enable(0);
 		return;
 	}
 	printf("alt_launcher: spawned pid=%d path=%s\n", s_pid, path);
@@ -349,8 +348,11 @@ void alt_launcher_shutdown(void)
 	if (!s_pid)
 	{
 		reset_launcher_state();
-		s_native_crt = false;
-		disable_native_crt_path();
+		if (s_native_crt)
+		{
+			s_native_crt = false;
+			disable_native_crt_path();
+		}
 		return;
 	}
 
@@ -381,6 +383,30 @@ void alt_launcher_shutdown(void)
 	}
 
 	reset_launcher_state();
-	s_native_crt = false;
-	disable_native_crt_path();
+	if (s_native_crt)
+	{
+		s_native_crt = false;
+		disable_native_crt_path();
+	}
+	else
+	{
+		video_fb_enable(0);
+	}
+}
+
+bool zaparoo_is_native_core(void)
+{
+	static const char *name = "Zaparoo Launcher";
+	return !strcasecmp(user_io_get_core_name(0), name) ||
+	       !strcasecmp(user_io_get_core_name(1), name);
+}
+
+void zaparoo_alt_launcher_init_for_core(void)
+{
+	if (cfg.alt_launcher[0] && cfg.fb_terminal && zaparoo_is_native_core())
+	{
+		printf("alt_launcher: initializing CRT mode for core '%s' '%s'\n",
+		       user_io_get_core_name(1), user_io_get_core_name(0));
+		alt_launcher_init(true);
+	}
 }

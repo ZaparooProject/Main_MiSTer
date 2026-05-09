@@ -210,26 +210,6 @@ char is_menu()
 	return (is_menu_type == 1);
 }
 
-static const char *zaparoo_native_core_name = "3S-ARM";
-static const char *zaparoo_native_core_name_320 = "Zaparoo Launcher";
-
-static bool is_zaparoo_native_core()
-{
-	return !strcasecmp(user_io_get_core_name(1), zaparoo_native_core_name) ||
-	       !strcasecmp(user_io_get_core_name(0), zaparoo_native_core_name) ||
-		   !strcasecmp(user_io_get_core_name(1), zaparoo_native_core_name_320) ||
-		   !strcasecmp(user_io_get_core_name(0), zaparoo_native_core_name_320);
-}
-
-static void zaparoo_alt_launcher_init_for_core()
-{
-	if (cfg.alt_launcher[0] && cfg.fb_terminal && is_zaparoo_native_core())
-	{
-		printf("alt_launcher: initializing CRT mode for core '%s' '%s'\n", user_io_get_core_name(1), user_io_get_core_name(0));
-		alt_launcher_init(true);
-	}
-}
-
 static int is_x86_type = 0;
 char is_x86()
 {
@@ -1508,7 +1488,6 @@ void user_io_init(const char *path, const char *xml)
 	{
 	case CORE_TYPE_UNKNOWN:
 		printf("Unable to identify core (%x)!\n", core_type);
-		zaparoo_alt_launcher_init_for_core();
 		break;
 
 	case CORE_TYPE_SHARPMZ:
