@@ -1577,8 +1577,19 @@ void HandleUI(void)
 				}
 				else if (is_menu())
 				{
-					menusub = 6;
-					SelectFile("", 0, SCANO_CORES, MENU_CORE_FILE_SELECTED1, MENU_SYSTEM1);
+					if (alt_launcher_configured())
+					{
+						// With an alt launcher, the file picker is not the user's
+						// natural entry point — they want the OSD overlay (System
+						// Settings) directly so they can flip CRT mode etc.
+						menustate = MENU_SYSTEM1;
+						menusub = 0;
+					}
+					else
+					{
+						menusub = 6;
+						SelectFile("", 0, SCANO_CORES, MENU_CORE_FILE_SELECTED1, MENU_SYSTEM1);
+					}
 				}
 				else if (is_minimig())
 				{
@@ -6780,6 +6791,13 @@ void HandleUI(void)
 	case MENU_SYSTEM2:
 		if (menu)
 		{
+			if (alt_launcher_configured())
+			{
+				// F12 toggles: the OSD opened directly into System Settings,
+				// pressing F12 again closes it instead of opening the core picker.
+				menustate = MENU_NONE1;
+				break;
+			}
 			SelectFile("", 0, SCANO_CORES, MENU_CORE_FILE_SELECTED1, MENU_SYSTEM1);
 			break;
 		}
