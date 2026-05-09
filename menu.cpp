@@ -829,7 +829,11 @@ const char* get_rbf_name_bootcore(char *str)
 
 static void vga_nag()
 {
-	if (video_fb_state())
+	// With an alt launcher configured the user has fb_terminal on by design
+	// and the CRT is fed directly by the menu core (snow pattern when status[9]=0,
+	// or the launcher's framebuffer when status[9]=1). The "fix MiSTer.ini"
+	// nag is not appropriate — just leave the OSD off without the warning.
+	if (video_fb_state() && !alt_launcher_configured())
 	{
 		EnableOsd_on(OSD_VGA);
 		OsdSetSize(16);
@@ -6705,7 +6709,11 @@ void HandleUI(void)
 		/* system menu */
 		/******************************************************************/
 	case MENU_SYSTEM1:
-		if (video_fb_state())
+		// Without an alt launcher, the wallpaper / fb_terminal flow can't coexist
+		// with this menu — bail out so vga_nag can show the MiSTer.ini warning.
+		// With an alt launcher the OSD overlay is exactly what we want on top of
+		// the running launcher, so let it render through.
+		if (video_fb_state() && !alt_launcher_configured())
 		{
 			menustate = MENU_NONE1;
 			break;
