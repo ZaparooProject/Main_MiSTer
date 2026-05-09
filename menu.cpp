@@ -1273,8 +1273,12 @@ void HandleUI(void)
 		}
 	}
 
-	//prevent OSD control while script is executing on framebuffer
-	if ((!video_fb_state() || video_chvt(0) != 2) && !select_ini)
+	// Prevent OSD control while a script is executing on the framebuffer.
+	// The alt launcher exception lets F12/MENU open the OSD overlay on top
+	// of the running launcher app — the OSD compositor sits post-ascal so
+	// it overlays whatever the launcher renders, and we deliberately skip
+	// the fb_terminal teardown on release so the launcher's display stays.
+	if (((!video_fb_state() || video_chvt(0) != 2) || alt_launcher_active()) && !select_ini)
 	{
 		switch (c)
 		{
@@ -1289,8 +1293,11 @@ void HandleUI(void)
 			if (!ignore_osd_release)
 				menu = true;
 			ignore_osd_release = false;
-			if(video_fb_state()) video_menu_bg(user_io_status_get("[3:1]"));
-			video_fb_enable(0);
+			if (!alt_launcher_active())
+			{
+				if(video_fb_state()) video_menu_bg(user_io_status_get("[3:1]"));
+				video_fb_enable(0);
+			}
 			break;
 		case KEY_F1:
 			if (is_menu() && cfg.fb_terminal)

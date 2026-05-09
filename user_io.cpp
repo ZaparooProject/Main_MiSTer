@@ -4157,14 +4157,12 @@ void user_io_kbd(uint16_t key, int press)
 		if (key)
 		{
 			uint32_t code = get_ps2_code(key);
-			// While the launcher is running the joypad MENU button (KEY_MENU,
-			// remapped via alt_launcher_fb_terminal_key) belongs to the launcher
-			// app's own UI. F12 stays with MiSTer so the user can overlay the
-			// native OSD on top of the launcher and toggle CRT mode without
-			// exiting their app — input grabbing flips automatically when the
-			// OSD opens (user_io_osd_key_enable -> input_switch).
-			if (alt_launcher_active() && key == KEY_MENU)
-				return;
+			// Both F12 and KEY_MENU now reach the normal menu/OSD flow even
+			// while the alt launcher is running, so the user can open the OSD
+			// overlay (System Settings) on top of their launcher app from
+			// either keyboard or joypad MENU button. Input grabbing flips
+			// automatically when the OSD opens (user_io_osd_key_enable ->
+			// input_switch -> EVIOCGRAB).
 			bool is_menu_event = ((has_menu() || osd_is_visible || (get_key_mod() & (LALT | RALT | RGUI | LGUI))) && (((key == KEY_F12) && (!is_f12_mod_needed() || (get_key_mod() & (RGUI | LGUI)))) || key == KEY_MENU));
 			if (!press)
 			{
