@@ -2811,6 +2811,10 @@ void HandleUI(void)
 				{
 					menumask |= (1ULL << ALT_LAUNCHER_MENUSUB);
 					MenuWrite(n++, " Launcher", menusub == ALT_LAUNCHER_MENUSUB, 0);
+
+					menumask |= (1ULL << ALT_LAUNCHER_CRT_MENUSUB);
+					sprintf(s, " CRT mode: %s", alt_launcher_native_crt() ? "On" : "Off");
+					MenuWrite(n++, s, menusub == ALT_LAUNCHER_CRT_MENUSUB, 0);
 				}
 
 				MenuWrite(n++, " Core                      \x16", menusub == 0, 0);
@@ -3057,6 +3061,11 @@ void HandleUI(void)
 
 			case ALT_LAUNCHER_MENUSUB:
 				reboot_req = 1;
+				break;
+
+			case ALT_LAUNCHER_CRT_MENUSUB:
+				alt_launcher_toggle_crt();
+				menustate = MENU_COMMON1;
 				break;
 
 			default:
