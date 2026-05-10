@@ -41,6 +41,7 @@
 #include "scaler.h"
 #include "support.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/menu_rbf.h"
 
 static char core_path[1024] = {};
 static char rbf_path[1024] = {};
@@ -1454,6 +1455,10 @@ void user_io_init(const char *path, const char *xml)
 		app_restart(path, xml, main);
 	}
 
+	// Zaparoo: u-boot/stock binary may have loaded the system menu.rbf before we got here.
+	// Force a reload of our hardcoded menu RBF if we booted without an explicit RBF path.
+	if (is_menu() && !rbf_path[0]) fpga_load_rbf(menu_rbf_name());
+
 	uint8_t hotswap[4] = {};
 	ide_reset(hotswap);
 
@@ -1528,7 +1533,7 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
-				if (cfg.alt_launcher[0] && cfg.fb_terminal) alt_launcher_init();
+				if (alt_launcher_configured()) zaparoo_alt_launcher_init_for_menu();
 				else
 				if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
 				else user_io_status_set("[3:1]", 0);
@@ -3032,7 +3037,7 @@ void user_io_set_ini(int ini_num)
 
 	if (!name[0])
 	{
-		name = "menu.rbf";
+		name = menu_rbf_name();
 		xml = NULL;
 	}
 
@@ -3709,7 +3714,7 @@ void user_io_poll()
 
 	if (!coldreset_req && prev_coldreset_req)
 	{
-		fpga_load_rbf("menu.rbf");
+		fpga_load_rbf(menu_rbf_name());
 	}
 
 	prev_coldreset_req = coldreset_req;
@@ -4157,8 +4162,12 @@ void user_io_kbd(uint16_t key, int press)
 		if (key)
 		{
 			uint32_t code = get_ps2_code(key);
-			if (alt_launcher_active() && (key == KEY_MENU || key == KEY_F12))
-				return;
+			// Both F12 and KEY_MENU now reach the normal menu/OSD flow even
+			// while the alt launcher is running, so the user can open the OSD
+			// overlay (System Settings) on top of their launcher app from
+			// either keyboard or joypad MENU button. Input grabbing flips
+			// automatically when the OSD opens (user_io_osd_key_enable ->
+			// input_switch -> EVIOCGRAB).
 			bool is_menu_event = ((has_menu() || osd_is_visible || (get_key_mod() & (LALT | RALT | RGUI | LGUI))) && (((key == KEY_F12) && (!is_f12_mod_needed() || (get_key_mod() & (RGUI | LGUI)))) || key == KEY_MENU));
 			if (!press)
 			{

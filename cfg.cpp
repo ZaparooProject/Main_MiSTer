@@ -139,7 +139,6 @@ static const ini_var_t ini_vars[] =
 	{ "SCREENSHOT_IMAGE_FORMAT", (void *)(&(cfg.screenshot_image_format)), STRING, 0, sizeof(cfg.screenshot_image_format) - 1 },
 	{ "XBE2_SHIFT", (void*)(&(cfg.xbe2_shift)), UINT16, 0, 0x22F },
 	{ "SPD_QUIRK", (void*)(&(cfg.spd_quirk)), UINT8, 0, 3 },
-	{ "ALT_LAUNCHER", (void*)(&(cfg.alt_launcher)), STRING, 0, sizeof(cfg.alt_launcher) - 1 },
 };
 
 static const int nvars = (int)(sizeof(ini_vars) / sizeof(ini_var_t));
@@ -580,7 +579,6 @@ const char* cfg_get_label(uint8_t alt)
 void cfg_parse()
 {
 	memset(&cfg, 0, sizeof(cfg));
-	alt_launcher_cfg_defaults();
 	cfg.csync = 1;
 	cfg.bootscreen = 1;
 	cfg.fb_terminal = 1;
@@ -612,6 +610,8 @@ void cfg_parse()
 		// second pass to look for section without vrefresh
 		ini_parse(altcfg(), video_get_core_mode_name(0));
 	}
+
+	alt_launcher_cfg_apply();
 
 	if (strlen(cfg.vga_mode))
 	{

@@ -50,6 +50,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "hardware.h"
 #include "menu.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/alt_launcher_menu.h"
+#include "support/zaparoo/launcher_pages.h"
+#include "support/zaparoo/menu_rbf.h"
 #include "user_io.h"
 #include "debug.h"
 #include "fpga_io.h"
@@ -82,6 +85,15 @@ enum MENU
 	MENU_COMMON2,
 	MENU_MISC1,
 	MENU_MISC2,
+
+	// Right-side companion to System Settings on the alt-launcher menu core.
+	// Top "Zaparoo Launcher" page lists sub-pages (Video) and an exit row;
+	// the Video sub-page hosts CRT mode + H/V centering offsets and binds
+	// left/right arrows to value adjustment.
+	MENU_ZAPAROO_LAUNCHER1,
+	MENU_ZAPAROO_LAUNCHER2,
+	MENU_ZAPAROO_VIDEO1,
+	MENU_ZAPAROO_VIDEO2,
 
 	MENU_SELECT_INI1,
 	MENU_SELECT_INI2,
@@ -411,8 +423,8 @@ void SelectFile(const char* path, const char* pFileExt, int Options, unsigned ch
 
 	if (Options & SCANO_CORES)
 	{
-		strcpy(selPath, get_rbf_dir());
-		if (strlen(get_rbf_name()))
+		strcpy(selPath, is_menu() ? "" : get_rbf_dir());
+		if (!is_menu() && strlen(get_rbf_name()))
 		{
 			if(strlen(selPath)) strcat(selPath, "/");
 			strcat(selPath, get_rbf_name());
@@ -572,7 +584,7 @@ static uint32_t menu_key_get(void)
 		else if (CheckTimer(repeat))
 		{
 			repeat = GetTimer(REPEATRATE);
-			if (GetASCIIKey(c1) || menustate == MENU_FILE_SELECT2 || ((menustate == MENU_COMMON2) && (menusub == 17)) || ((menustate == MENU_SYSTEM2) && (menusub == 5)))
+			if (GetASCIIKey(c1) || menustate == MENU_FILE_SELECT2 || ((menustate == MENU_COMMON2) && (menusub == 17)) || ((menustate == MENU_SYSTEM2) && (menusub == 5)) || ((menustate == MENU_SYSTEM2) && alt_launcher_system_holding_reboot(menusub)))
 			{
 				c = c1;
 				hold_cnt++;
@@ -829,7 +841,11 @@ const char* get_rbf_name_bootcore(char *str)
 
 static void vga_nag()
 {
-	if (video_fb_state())
+	// With an alt launcher configured the user has fb_terminal on by design
+	// and the CRT is fed directly by the menu core (snow pattern when status[9]=0,
+	// or the launcher's framebuffer when status[9]=1). The "fix MiSTer.ini"
+	// nag is not appropriate — just leave the OSD off without the warning.
+	if (video_fb_state() && !alt_launcher_configured())
 	{
 		EnableOsd_on(OSD_VGA);
 		OsdSetSize(16);
@@ -1270,7 +1286,7 @@ void HandleUI(void)
 	}
 
 	//prevent OSD control while script is executing on framebuffer
-	if ((!video_fb_state() || video_chvt(0) != 2) && !select_ini)
+	if (((!video_fb_state() || video_chvt(0) != 2) || alt_launcher_active()) && !select_ini)
 	{
 		switch (c)
 		{
@@ -1285,11 +1301,14 @@ void HandleUI(void)
 			if (!ignore_osd_release)
 				menu = true;
 			ignore_osd_release = false;
-			if(video_fb_state()) video_menu_bg(user_io_status_get("[3:1]"));
-			video_fb_enable(0);
+			if (!alt_launcher_active())
+			{
+				if(video_fb_state()) video_menu_bg(user_io_status_get("[3:1]"));
+				video_fb_enable(0);
+			}
 			break;
 		case KEY_F1:
-			if (is_menu() && cfg.fb_terminal)
+			if (!alt_launcher_active() && is_menu() && cfg.fb_terminal)
 			{
 				user_io_status_set("[3:1]", user_io_status_get("[3:1]") + 1);
 				user_io_status_save(user_io_create_config_name());
@@ -1312,7 +1331,7 @@ void HandleUI(void)
 			break;
 
 		case KEY_F9:
-			if ((is_menu() || ((get_key_mod() & (LALT | RALT)) && (get_key_mod() & (LCTRL | RCTRL))) || has_fb_terminal) && cfg.fb_terminal)
+			if (!alt_launcher_active() && (is_menu() || ((get_key_mod() & (LALT | RALT)) && (get_key_mod() & (LCTRL | RCTRL))) || has_fb_terminal) && cfg.fb_terminal)
 			{
 				video_chvt(1);
 				video_fb_enable(!video_fb_state());
@@ -1376,7 +1395,6 @@ void HandleUI(void)
 			break;
 		}
 	}
-
 	if (select_ini)
 	{
 		DISKLED_ON;
@@ -1556,7 +1574,13 @@ void HandleUI(void)
 			menustate = MENU_UNLOCK1;
 			osd_code_entry[0] = 0;
 		}
-		else if (menu || (is_menu() && !video_fb_state()) || (menustate == MENU_NONE2 && !mgl->done && mgl->state == 1))
+		// On the menu core without an alt launcher, the menu *is* the screen —
+		// keep auto-opening the OSD whenever fb_terminal is off. With an alt
+		// launcher running, that rule would re-open System Settings the moment
+		// the user closes it (in CRT mode video_fb_state is false), so the OSD
+		// could never actually close. Suppress the auto-open in that case;
+		// explicit F12/MENU presses still open and close it normally.
+		else if (menu || (is_menu() && !video_fb_state() && !alt_launcher_active()) || (menustate == MENU_NONE2 && !mgl->done && mgl->state == 1))
 		{
 			OsdSetSize(16);
 			menusub = 0;
@@ -1577,8 +1601,19 @@ void HandleUI(void)
 				}
 				else if (is_menu())
 				{
-					menusub = 6;
-					SelectFile("", 0, SCANO_CORES, MENU_CORE_FILE_SELECTED1, MENU_SYSTEM1);
+					if (alt_launcher_configured())
+					{
+						// With an alt launcher, the file picker is not the user's
+						// natural entry point — they want the OSD overlay (System
+						// Settings) directly so they can flip CRT mode etc.
+						menustate = MENU_SYSTEM1;
+						menusub = 0;
+					}
+					else
+					{
+						menusub = 6;
+						SelectFile("", 0, SCANO_CORES, MENU_CORE_FILE_SELECTED1, MENU_SYSTEM1);
+					}
 				}
 				else if (is_minimig())
 				{
@@ -3107,7 +3142,7 @@ void HandleUI(void)
 			}
 		}
 
-		if(!hold_cnt && reboot_req) fpga_load_rbf("menu.rbf");
+		if(!hold_cnt && reboot_req) fpga_load_rbf(menu_rbf_name());
 		break;
 
 	case MENU_VIDEOPROC1:
@@ -6685,7 +6720,11 @@ void HandleUI(void)
 		/* system menu */
 		/******************************************************************/
 	case MENU_SYSTEM1:
-		if (video_fb_state())
+		// Without an alt launcher, the wallpaper / fb_terminal flow can't coexist
+		// with this menu — bail out so vga_nag can show the MiSTer.ini warning.
+		// With an alt launcher the OSD overlay is exactly what we want on top of
+		// the running launcher, so let it render through.
+		if (video_fb_state() && !alt_launcher_configured())
 		{
 			menustate = MENU_NONE1;
 			break;
@@ -6694,6 +6733,15 @@ void HandleUI(void)
 		OsdSetSize(16);
 		helptext_idx = 0;
 		parentstate = menustate;
+
+		// alt-launcher mode delegates the entire System menu render to a
+		// support helper so this upstream block stays untouched.
+		if (alt_launcher_configured())
+		{
+			cr = alt_launcher_render_system_menu(menusub, &menumask, &reboot_req, &sysinfo_timer);
+			menustate = MENU_SYSTEM2;
+			break;
+		}
 
 		m = 0;
 		OsdSetTitle("System Settings", OSD_ARROW_LEFT);
@@ -6765,12 +6813,21 @@ void HandleUI(void)
 	case MENU_SYSTEM2:
 		if (menu)
 		{
+			if (alt_launcher_configured())
+			{
+				// F12 toggles: the OSD opened directly into System Settings,
+				// pressing F12 again closes it instead of opening the core picker.
+				menustate = MENU_NONE1;
+				break;
+			}
 			SelectFile("", 0, SCANO_CORES, MENU_CORE_FILE_SELECTED1, MENU_SYSTEM1);
 			break;
 		}
 		else if (select)
 		{
-			switch (menusub)
+			int dispatch = alt_launcher_translate_system_select(menusub);
+			if (dispatch < 0) { menustate = MENU_SYSTEM1; break; }
+			switch (dispatch)
 			{
 			case 0:
 				if (getStorage(1) || isUSBMounted()) setStorage(!getStorage(1));
@@ -6841,8 +6898,98 @@ void HandleUI(void)
 		{
 			menustate = MENU_MISC1;
 		}
+		else if (right && alt_launcher_configured())
+		{
+			menustate = MENU_ZAPAROO_LAUNCHER1;
+			menusub = 0;
+		}
 
-		if (!hold_cnt && reboot_req) fpga_load_rbf("menu.rbf");
+		if (!hold_cnt && reboot_req) fpga_load_rbf(menu_rbf_name());
+		break;
+
+		/******************************************************************/
+		/* zaparoo launcher pages (right-side sibling of System)          */
+		/******************************************************************/
+	case MENU_ZAPAROO_LAUNCHER1:
+		if (!alt_launcher_configured())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		parentstate = menustate;
+		launcher_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_LAUNCHER2;
+		break;
+
+	case MENU_ZAPAROO_LAUNCHER2:
+		if (menu)
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		if (left)
+		{
+			menustate = MENU_SYSTEM1;
+			menusub = 0;
+			break;
+		}
+		if (right && menusub == 0)
+		{
+			menustate = MENU_ZAPAROO_VIDEO1;
+			menusub = 0;
+			break;
+		}
+		if (select)
+		{
+			int act = launcher_page_handle_select(menusub);
+			if (act == 1)
+			{
+				menustate = MENU_ZAPAROO_VIDEO1;
+				menusub = 0;
+			}
+			else if (act == 0)
+			{
+				menustate = MENU_NONE1;
+			}
+		}
+		break;
+
+	case MENU_ZAPAROO_VIDEO1:
+		if (!alt_launcher_configured())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		parentstate = menustate;
+		video_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_VIDEO2;
+		break;
+
+	case MENU_ZAPAROO_VIDEO2:
+		if (menu)
+		{
+			menustate = MENU_ZAPAROO_LAUNCHER1;
+			menusub = 0;
+			break;
+		}
+		if (left || right || plus || minus)
+		{
+			video_page_adjust(menusub, (right || plus) ? +1 : -1);
+			menustate = MENU_ZAPAROO_VIDEO1;
+			break;
+		}
+		if (select)
+		{
+			if (!video_page_handle_select(menusub))
+			{
+				menustate = MENU_ZAPAROO_LAUNCHER1;
+				menusub = 0;
+				break;
+			}
+			menustate = MENU_ZAPAROO_VIDEO1;
+		}
 		break;
 
 	case MENU_JOYSYSMAP:

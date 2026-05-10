@@ -9,27 +9,43 @@
 #include <termios.h>
 #include <unistd.h>
 #include <linux/input.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include "cfg.h"
 #include "file_io.h"
 #include "hardware.h"
 #include "input.h"
+#include "menu.h"
+#include "shmem.h"
 #include "user_io.h"
 #include "video.h"
 
-void alt_launcher_cfg_defaults(void)
+static const char s_launcher_path[] = "zaparoo/launcher";
+
+void alt_launcher_cfg_apply(void)
 {
+	// Override any user ini values: this fork is single-purpose and the
+	// launcher needs both flags on to render.
+	cfg.fb_terminal = 1;
 	cfg.recents = 1;
 }
 
+static bool s_escaped = false;
+
 bool alt_launcher_configured(void)
 {
-	return cfg.alt_launcher[0] && cfg.fb_terminal;
+	// After a clean exit / give-up, masquerade as not-configured so the rest
+	// of the OSD reverts to stock menu behavior for the rest of this session.
+	// Reboot re-execs MiSTer and resets this back to the file-existence cache.
+	if (s_escaped) return false;
+	static int cached = -1;
+	if (cached < 0) cached = FileExists(s_launcher_path, 0) ? 1 : 0;
+	return cached != 0;
 }
 
 uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button)
 {
-	if (!cfg.alt_launcher[0])
+	if (!alt_launcher_configured())
 		return 0;
 
 	if (osd_button)
@@ -58,6 +74,45 @@ static const int s_vt = 2;
 static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
 static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
+static const char s_crt_state_file[] = "zaparoo_launcher_crt.bin";
+static const char s_offsets_file[] = "zaparoo_video_offsets.bin";
+
+static int8_t s_h_offset = 0;
+static int8_t s_v_offset = 0;
+
+static int8_t clamp_offset(int8_t v)
+{
+	if (v < -8) return -8;
+	if (v > 7) return 7;
+	return v;
+}
+
+static bool load_persisted_native_crt(void)
+{
+	uint8_t v = 0;
+	FileLoadConfig(s_crt_state_file, &v, sizeof(v));
+	return v != 0;
+}
+
+static void save_persisted_native_crt(bool crt)
+{
+	uint8_t v = crt ? 1 : 0;
+	FileSaveConfig(s_crt_state_file, &v, sizeof(v));
+}
+
+static void load_persisted_offsets(void)
+{
+	int8_t buf[2] = { 0, 0 };
+	FileLoadConfig(s_offsets_file, buf, sizeof(buf));
+	s_h_offset = clamp_offset(buf[0]);
+	s_v_offset = clamp_offset(buf[1]);
+}
+
+static void save_persisted_offsets(void)
+{
+	int8_t buf[2] = { s_h_offset, s_v_offset };
+	FileSaveConfig(s_offsets_file, buf, sizeof(buf));
+}
 
 static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int stride, bool log = true)
 {
@@ -77,6 +132,27 @@ static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int str
 static void set_native_crt_fb_mode(bool log = true)
 {
 	set_launcher_fb_mode(8888, 1, 320, 240, 1280, log);
+}
+
+static void blank_native_crt_fb(void)
+{
+	// CRT path doesn't read /dev/fb0 (kernel FB at 0x22000000). The launcher
+	// runs a worker that copies the top-left 320x240 from /dev/fb0 into a
+	// separate FPGA-mapped region at 0x3A000000 (control word + two 320x240
+	// RGBA buffers). The FPGA scans out from that region. Nothing zeros it
+	// across launcher restarts or software reboots, so the previous session's
+	// last frame ghosts in until the launcher's writer thread starts.
+	const uint32_t native_addr = 0x3A000000u;
+	const uint32_t native_size = 0x000A0000u;
+	void *p = shmem_map(native_addr, native_size);
+	if (!p)
+	{
+		printf("alt_launcher: blank native shmem_map(0x%x, %u) failed\n", native_addr, native_size);
+		return;
+	}
+	memset(p, 0, native_size);
+	shmem_unmap(p, native_size);
+	printf("alt_launcher: blanked %u bytes of CRT native video DDR at 0x%x\n", native_size, native_addr);
 }
 
 static void clear_launcher_tty(void)
@@ -148,7 +224,17 @@ static void enable_native_crt_path(void)
 {
 	set_vga_fb(0);
 	video_fb_enable(0);
+
+	// Double-write with a settle window so the kernel module's 320x240 layout
+	// is live before status[9] flips. Without this, the launcher renders for
+	// up to a second under stale dims (the post-fork retry timer used to be
+	// what eventually fixed the picture).
+	set_native_crt_fb_mode(false);
+	usleep(100000);
 	set_native_crt_fb_mode();
+
+	blank_native_crt_fb();
+
 	user_io_status_set("[9]", 1);
 	s_native_status_timer = GetTimer(500);
 	if (!s_native_status_timer) s_native_status_timer = 1;
@@ -177,6 +263,7 @@ static void return_to_normal_mode(void)
 	s_respawn_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = true;
+	s_escaped = true;
 }
 
 static void reset_launcher_state(void)
@@ -186,6 +273,7 @@ static void reset_launcher_state(void)
 	s_crash_count = 0;
 	s_gave_up = false;
 	s_init_pending = false;
+	s_escaped = false;
 }
 
 static void kill_launcher(pid_t pid, int sig)
@@ -197,7 +285,7 @@ static void kill_launcher(pid_t pid, int sig)
 static void spawn(void)
 {
 	char path[2100];
-	strncpy(path, getFullPath(cfg.alt_launcher), sizeof(path) - 1);
+	strncpy(path, getFullPath(s_launcher_path), sizeof(path) - 1);
 	path[sizeof(path) - 1] = '\0';
 
 	static const char cmd[] =
@@ -262,6 +350,11 @@ static void spawn(void)
 		input_switch(0);
 		user_io_status_set("[9]", 1);
 	}
+
+	// The launcher grabs input as soon as it starts. If the OSD is still
+	// up (e.g. user toggled CRT mode or hit Reboot from System Settings),
+	// it would trap input with no way to dismiss it — drop it now.
+	if (menu_present()) MenuHide();
 }
 
 bool alt_launcher_active(void)
@@ -269,9 +362,55 @@ bool alt_launcher_active(void)
 	return s_pid != 0;
 }
 
+bool alt_launcher_native_crt(void)
+{
+	return s_native_crt && s_pid != 0;
+}
+
+int8_t alt_launcher_h_offset(void)
+{
+	return s_h_offset;
+}
+
+int8_t alt_launcher_v_offset(void)
+{
+	return s_v_offset;
+}
+
+void alt_launcher_set_h_offset(int8_t v)
+{
+	s_h_offset = clamp_offset(v);
+	save_persisted_offsets();
+	// 4-bit two's-complement bit pattern; FPGA reinterprets as signed -8..+7.
+	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));
+}
+
+void alt_launcher_set_v_offset(int8_t v)
+{
+	s_v_offset = clamp_offset(v);
+	save_persisted_offsets();
+	user_io_status_set("[17:14]", (uint32_t)((uint8_t)s_v_offset & 0xF));
+}
+
+void alt_launcher_toggle_crt(void)
+{
+	bool current_crt = alt_launcher_native_crt();
+	bool target_crt  = !current_crt;
+
+	save_persisted_native_crt(target_crt);
+
+	printf("alt_launcher: toggle CRT path %d -> %d\n", current_crt, target_crt);
+
+	// Shutdown drops status[9], releases the FB mode and restores HPS framebuffer
+	// state regardless of whether the launcher was running. After it returns we
+	// always have a clean slate to spawn the next launcher invocation.
+	alt_launcher_shutdown();
+	alt_launcher_init(target_crt);
+}
+
 void alt_launcher_init(bool native_crt)
 {
-	if (!cfg.alt_launcher[0] || !cfg.fb_terminal || s_pid || s_gave_up)
+	if (!alt_launcher_configured() || s_pid || s_gave_up)
 		return;
 	s_crash_count = 0;
 	s_respawn_timer = 0;
@@ -306,6 +445,18 @@ void alt_launcher_poll(void)
 			int sig = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
 			bool escaped = (exited && exit_status == 0) || sig == SIGTERM || sig == SIGINT;
 			bool crashed = !escaped && (sig != 0 || (exited && exit_status != 0));
+			// Any exit while in CRT mode drops back to HDMI / no launcher
+			// for the rest of this session — respawning into CRT after the
+			// user already left it is a UX trap. The persisted CRT
+			// preference is intentionally untouched (return_to_normal_mode
+			// only clears the in-memory s_native_crt), so the next reboot
+			// honors whatever the user last set in System Settings.
+			if (s_native_crt)
+			{
+				printf("alt_launcher: exited while in CRT mode, dropping to HDMI normal mode\n");
+				return_to_normal_mode();
+				return;
+			}
 			if (escaped)
 			{
 				printf("alt_launcher: exited, returning to normal mode until restart\n");
@@ -326,7 +477,7 @@ void alt_launcher_poll(void)
 		return;
 	}
 
-	if (!cfg.alt_launcher[0] || !cfg.fb_terminal)
+	if (!alt_launcher_configured())
 		return;
 
 	if (s_init_pending)
@@ -403,10 +554,22 @@ bool zaparoo_is_native_core(void)
 
 void zaparoo_alt_launcher_init_for_core(void)
 {
-	if (cfg.alt_launcher[0] && cfg.fb_terminal && zaparoo_is_native_core())
+	if (alt_launcher_configured() && zaparoo_is_native_core())
 	{
 		printf("alt_launcher: initializing CRT mode for core '%s' '%s'\n",
 		       user_io_get_core_name(1), user_io_get_core_name(0));
 		alt_launcher_init(true);
 	}
+}
+
+void zaparoo_alt_launcher_init_for_menu(void)
+{
+	bool crt = load_persisted_native_crt();
+	load_persisted_offsets();
+	printf("alt_launcher: initializing menu launcher (persisted crt=%d, h=%d, v=%d)\n",
+	       crt, s_h_offset, s_v_offset);
+	// Push the persisted offsets to the FPGA now that the menu RBF is loaded.
+	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));
+	user_io_status_set("[17:14]", (uint32_t)((uint8_t)s_v_offset & 0xF));
+	alt_launcher_init(crt);
 }

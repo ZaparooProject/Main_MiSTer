@@ -33,6 +33,7 @@
 #include "scheduler.h"
 #include "video.h"
 #include "support.h"
+#include "support/zaparoo/menu_rbf.h"
 
 #define MIN(a,b) (((a)<(b)) ? (a) : (b))
 
@@ -1127,7 +1128,7 @@ void setStorage(int dev)
 {
 	device = 0;
 	FileSave(CONFIG_DIR"/device.bin", &dev, sizeof(int));
-	fpga_load_rbf("menu.rbf");
+	fpga_load_rbf(menu_rbf_name());
 }
 
 static int orig_device = 0;
@@ -1693,7 +1694,7 @@ int ScanDirectory(char* path, int mode, const char *extension, int options, cons
 					// skip hidden files
 					if (!strncasecmp(de->d_name, ".", 1)) continue;
 					//skip non-selectable files
-					if (!strcasecmp(de->d_name, "menu.rbf")) continue;
+					if (is_menu_rbf(de->d_name)) continue;
 					if (!strncasecmp(de->d_name, "menu_20", 7)) continue;
 					if (!strncasecmp(de->d_name, "boot", 4))
 					{
