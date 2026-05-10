@@ -4,10 +4,10 @@
 #include <stdint.h>
 
 // Trimmed System Settings menu for alt-launcher mode. The launcher is
-// the only "core" running on top of menu.rbf, so storage toggle,
-// scripts and the bundled help PDF are irrelevant — this layout
-// hides them and exposes only Remap(0), Define joy(1), CRT mode(2),
-// Reboot(3), Exit(4).
+// the only "core" running on top of menu.rbf, so storage toggle and
+// the bundled help PDF are irrelevant — this layout hides them and
+// exposes Remap(0), Define joy(1), Scripts(2), Reboot(3), Exit(4).
+// CRT mode lives on the Zaparoo Launcher's Video sub-page.
 //
 // All three helpers are no-ops / return safe defaults when
 // alt_launcher_configured() is false, so menu.cpp's hook sites can

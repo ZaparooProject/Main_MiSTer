@@ -15,6 +15,7 @@
 #include "file_io.h"
 #include "hardware.h"
 #include "input.h"
+#include "menu.h"
 #include "shmem.h"
 #include "user_io.h"
 #include "video.h"
@@ -349,6 +350,11 @@ static void spawn(void)
 		input_switch(0);
 		user_io_status_set("[9]", 1);
 	}
+
+	// The launcher grabs input as soon as it starts. If the OSD is still
+	// up (e.g. user toggled CRT mode or hit Reboot from System Settings),
+	// it would trap input with no way to dismiss it — drop it now.
+	if (menu_present()) MenuHide();
 }
 
 bool alt_launcher_active(void)
@@ -439,6 +445,18 @@ void alt_launcher_poll(void)
 			int sig = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
 			bool escaped = (exited && exit_status == 0) || sig == SIGTERM || sig == SIGINT;
 			bool crashed = !escaped && (sig != 0 || (exited && exit_status != 0));
+			// Any exit while in CRT mode drops back to HDMI / no launcher
+			// for the rest of this session — respawning into CRT after the
+			// user already left it is a UX trap. The persisted CRT
+			// preference is intentionally untouched (return_to_normal_mode
+			// only clears the in-memory s_native_crt), so the next reboot
+			// honors whatever the user last set in System Settings.
+			if (s_native_crt)
+			{
+				printf("alt_launcher: exited while in CRT mode, dropping to HDMI normal mode\n");
+				return_to_normal_mode();
+				return;
+			}
 			if (escaped)
 			{
 				printf("alt_launcher: exited, returning to normal mode until restart\n");

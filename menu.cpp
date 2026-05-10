@@ -51,7 +51,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "menu.h"
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/alt_launcher_menu.h"
-#include "support/zaparoo/display_menu.h"
+#include "support/zaparoo/launcher_pages.h"
 #include "support/zaparoo/menu_rbf.h"
 #include "user_io.h"
 #include "debug.h"
@@ -87,9 +87,13 @@ enum MENU
 	MENU_MISC2,
 
 	// Right-side companion to System Settings on the alt-launcher menu core.
-	// Hosts H/V offset adjustment and the CRT mode toggle.
-	MENU_ZAPAROO_DISPLAY1,
-	MENU_ZAPAROO_DISPLAY2,
+	// Top "Zaparoo Launcher" page lists sub-pages (Video) and an exit row;
+	// the Video sub-page hosts CRT mode + H/V centering offsets and binds
+	// left/right arrows to value adjustment.
+	MENU_ZAPAROO_LAUNCHER1,
+	MENU_ZAPAROO_LAUNCHER2,
+	MENU_ZAPAROO_VIDEO1,
+	MENU_ZAPAROO_VIDEO2,
 
 	MENU_SELECT_INI1,
 	MENU_SELECT_INI2,
@@ -6896,7 +6900,7 @@ void HandleUI(void)
 		}
 		else if (right && alt_launcher_configured())
 		{
-			menustate = MENU_ZAPAROO_DISPLAY1;
+			menustate = MENU_ZAPAROO_LAUNCHER1;
 			menusub = 0;
 		}
 
@@ -6904,9 +6908,9 @@ void HandleUI(void)
 		break;
 
 		/******************************************************************/
-		/* zaparoo display centering page (right-side sibling of System)  */
+		/* zaparoo launcher pages (right-side sibling of System)          */
 		/******************************************************************/
-	case MENU_ZAPAROO_DISPLAY1:
+	case MENU_ZAPAROO_LAUNCHER1:
 		if (!alt_launcher_configured())
 		{
 			menustate = MENU_NONE1;
@@ -6914,11 +6918,11 @@ void HandleUI(void)
 		}
 		helptext_idx = 0;
 		parentstate = menustate;
-		display_menu_render(menusub, &menumask);
-		menustate = MENU_ZAPAROO_DISPLAY2;
+		launcher_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_LAUNCHER2;
 		break;
 
-	case MENU_ZAPAROO_DISPLAY2:
+	case MENU_ZAPAROO_LAUNCHER2:
 		if (menu)
 		{
 			menustate = MENU_NONE1;
@@ -6930,20 +6934,61 @@ void HandleUI(void)
 			menusub = 0;
 			break;
 		}
-		if (plus || minus)
+		if (right && menusub == 0)
 		{
-			display_menu_adjust(menusub, plus ? +1 : -1);
-			menustate = MENU_ZAPAROO_DISPLAY1;
+			menustate = MENU_ZAPAROO_VIDEO1;
+			menusub = 0;
 			break;
 		}
 		if (select)
 		{
-			if (!display_menu_handle_select(menusub))
+			int act = launcher_page_handle_select(menusub);
+			if (act == 1)
+			{
+				menustate = MENU_ZAPAROO_VIDEO1;
+				menusub = 0;
+			}
+			else if (act == 0)
 			{
 				menustate = MENU_NONE1;
+			}
+		}
+		break;
+
+	case MENU_ZAPAROO_VIDEO1:
+		if (!alt_launcher_configured())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		parentstate = menustate;
+		video_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_VIDEO2;
+		break;
+
+	case MENU_ZAPAROO_VIDEO2:
+		if (menu)
+		{
+			menustate = MENU_ZAPAROO_LAUNCHER1;
+			menusub = 0;
+			break;
+		}
+		if (left || right || plus || minus)
+		{
+			video_page_adjust(menusub, (right || plus) ? +1 : -1);
+			menustate = MENU_ZAPAROO_VIDEO1;
+			break;
+		}
+		if (select)
+		{
+			if (!video_page_handle_select(menusub))
+			{
+				menustate = MENU_ZAPAROO_LAUNCHER1;
+				menusub = 0;
 				break;
 			}
-			menustate = MENU_ZAPAROO_DISPLAY1;
+			menustate = MENU_ZAPAROO_VIDEO1;
 		}
 		break;
 
