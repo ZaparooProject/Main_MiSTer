@@ -54,7 +54,6 @@ fi
 
 STABLE_NAME=$(basename "${STABLE_FILE}")
 STABLE_DATE=${STABLE_NAME#MiSTer_}
-FORK_COMMITS=$(git rev-list --reverse --no-merges "${UPSTREAM_REF}..${FORK_HEAD}")
 
 if [ -n "${METADATA_FILE}" ]; then
     cat >"${METADATA_FILE}" <<EOF
@@ -79,8 +78,15 @@ trap cleanup EXIT
 echo "==> Building from upstream ${STABLE_NAME} with Zaparoo ${FORK_SHORT_SHA}"
 git worktree add --detach "${TMP_WORKTREE}" "${STABLE_COMMIT}" >/dev/null
 
-if [ -n "${FORK_COMMITS}" ]; then
-    git -C "${TMP_WORKTREE}" cherry-pick --no-commit ${FORK_COMMITS}
+# Apply the cumulative fork-only diff (relative to upstream master) so revert
+# pairs and other intra-fork conflicts cancel out — replaying commit-by-commit
+# would re-expose them. -3 falls back to a 3-way merge when stable's content
+# for a shared file has drifted from upstream master. MiSTer.ini is excluded:
+# the fork's only change is an uncomment of a default-valued line, and stable's
+# example ini drifts often enough to cause spurious conflicts.
+FORK_DIFF=$(git diff --binary "${UPSTREAM_REF}..${FORK_HEAD}" -- . ':(exclude)MiSTer.ini')
+if [ -n "${FORK_DIFF}" ]; then
+    printf '%s\n' "${FORK_DIFF}" | git -C "${TMP_WORKTREE}" apply -3 --index
 fi
 
 "${TMP_WORKTREE}/docker-build.sh" "$@"
