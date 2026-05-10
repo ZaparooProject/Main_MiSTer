@@ -58,6 +58,20 @@ static const int s_vt = 2;
 static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
 static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
+static const char s_crt_state_file[] = "alt_launcher_crt.bin";
+
+static bool load_persisted_native_crt(void)
+{
+	uint8_t v = 0;
+	FileLoadConfig(s_crt_state_file, &v, sizeof(v));
+	return v != 0;
+}
+
+static void save_persisted_native_crt(bool crt)
+{
+	uint8_t v = crt ? 1 : 0;
+	FileSaveConfig(s_crt_state_file, &v, sizeof(v));
+}
 
 static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int stride, bool log = true)
 {
@@ -279,6 +293,8 @@ void alt_launcher_toggle_crt(void)
 	bool current_crt = alt_launcher_native_crt();
 	bool target_crt  = !current_crt;
 
+	save_persisted_native_crt(target_crt);
+
 	printf("alt_launcher: toggle CRT path %d -> %d\n", current_crt, target_crt);
 
 	// Shutdown drops status[9], releases the FB mode and restores HPS framebuffer
@@ -428,4 +444,11 @@ void zaparoo_alt_launcher_init_for_core(void)
 		       user_io_get_core_name(1), user_io_get_core_name(0));
 		alt_launcher_init(true);
 	}
+}
+
+void zaparoo_alt_launcher_init_for_menu(void)
+{
+	bool crt = load_persisted_native_crt();
+	printf("alt_launcher: initializing menu launcher (persisted crt=%d)\n", crt);
+	alt_launcher_init(crt);
 }
