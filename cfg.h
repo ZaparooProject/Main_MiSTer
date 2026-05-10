@@ -106,8 +106,6 @@ typedef struct {
 	char screenshot_image_format[16];
 	uint16_t xbe2_shift;
 	uint8_t spd_quirk;
-	char alt_launcher[1024];
-	char menu_rbf[1024];
 } cfg_t;
 
 extern cfg_t cfg;

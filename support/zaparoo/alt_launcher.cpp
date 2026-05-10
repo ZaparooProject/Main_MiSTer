@@ -19,19 +19,26 @@
 #include "user_io.h"
 #include "video.h"
 
-void alt_launcher_cfg_defaults(void)
+static const char s_launcher_path[] = "zaparoo/launcher";
+
+void alt_launcher_cfg_apply(void)
 {
+	// Override any user ini values: this fork is single-purpose and the
+	// launcher needs both flags on to render.
+	cfg.fb_terminal = 1;
 	cfg.recents = 1;
 }
 
 bool alt_launcher_configured(void)
 {
-	return cfg.alt_launcher[0] && cfg.fb_terminal;
+	static int cached = -1;
+	if (cached < 0) cached = FileExists(s_launcher_path, 0) ? 1 : 0;
+	return cached != 0;
 }
 
 uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button)
 {
-	if (!cfg.alt_launcher[0])
+	if (!alt_launcher_configured())
 		return 0;
 
 	if (osd_button)
@@ -60,7 +67,7 @@ static const int s_vt = 2;
 static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
 static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
-static const char s_crt_state_file[] = "alt_launcher_crt.bin";
+static const char s_crt_state_file[] = "zaparoo_launcher_crt.bin";
 
 static bool load_persisted_native_crt(void)
 {
@@ -244,7 +251,7 @@ static void kill_launcher(pid_t pid, int sig)
 static void spawn(void)
 {
 	char path[2100];
-	strncpy(path, getFullPath(cfg.alt_launcher), sizeof(path) - 1);
+	strncpy(path, getFullPath(s_launcher_path), sizeof(path) - 1);
 	path[sizeof(path) - 1] = '\0';
 
 	static const char cmd[] =
@@ -339,7 +346,7 @@ void alt_launcher_toggle_crt(void)
 
 void alt_launcher_init(bool native_crt)
 {
-	if (!cfg.alt_launcher[0] || !cfg.fb_terminal || s_pid || s_gave_up)
+	if (!alt_launcher_configured() || s_pid || s_gave_up)
 		return;
 	s_crash_count = 0;
 	s_respawn_timer = 0;
@@ -394,7 +401,7 @@ void alt_launcher_poll(void)
 		return;
 	}
 
-	if (!cfg.alt_launcher[0] || !cfg.fb_terminal)
+	if (!alt_launcher_configured())
 		return;
 
 	if (s_init_pending)
@@ -471,7 +478,7 @@ bool zaparoo_is_native_core(void)
 
 void zaparoo_alt_launcher_init_for_core(void)
 {
-	if (cfg.alt_launcher[0] && cfg.fb_terminal && zaparoo_is_native_core())
+	if (alt_launcher_configured() && zaparoo_is_native_core())
 	{
 		printf("alt_launcher: initializing CRT mode for core '%s' '%s'\n",
 		       user_io_get_core_name(1), user_io_get_core_name(0));

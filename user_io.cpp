@@ -1456,8 +1456,8 @@ void user_io_init(const char *path, const char *xml)
 	}
 
 	// Zaparoo: u-boot/stock binary may have loaded the system menu.rbf before we got here.
-	// If our cfg.menu_rbf differs and we booted without an explicit RBF path, force a reload.
-	if (is_menu() && cfg.menu_rbf[0] && !rbf_path[0]) fpga_load_rbf(menu_rbf_name());
+	// Force a reload of our hardcoded menu RBF if we booted without an explicit RBF path.
+	if (is_menu() && !rbf_path[0]) fpga_load_rbf(menu_rbf_name());
 
 	uint8_t hotswap[4] = {};
 	ide_reset(hotswap);
@@ -1533,7 +1533,7 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
-				if (cfg.alt_launcher[0] && cfg.fb_terminal) zaparoo_alt_launcher_init_for_menu();
+				if (alt_launcher_configured()) zaparoo_alt_launcher_init_for_menu();
 				else
 				if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
 				else user_io_status_set("[3:1]", 0);

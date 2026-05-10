@@ -12,7 +12,7 @@ bool alt_launcher_native_crt(void);
 bool alt_launcher_active(void);
 bool alt_launcher_configured(void);
 
-void alt_launcher_cfg_defaults(void);
+void alt_launcher_cfg_apply(void);
 uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button);
 
 bool zaparoo_is_native_core(void);
