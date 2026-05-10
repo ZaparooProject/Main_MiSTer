@@ -413,8 +413,8 @@ void SelectFile(const char* path, const char* pFileExt, int Options, unsigned ch
 
 	if (Options & SCANO_CORES)
 	{
-		strcpy(selPath, get_rbf_dir());
-		if (strlen(get_rbf_name()))
+		strcpy(selPath, is_menu() ? "" : get_rbf_dir());
+		if (!is_menu() && strlen(get_rbf_name()))
 		{
 			if(strlen(selPath)) strcat(selPath, "/");
 			strcat(selPath, get_rbf_name());

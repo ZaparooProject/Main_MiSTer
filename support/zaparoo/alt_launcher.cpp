@@ -29,8 +29,14 @@ void alt_launcher_cfg_apply(void)
 	cfg.recents = 1;
 }
 
+static bool s_escaped = false;
+
 bool alt_launcher_configured(void)
 {
+	// After a clean exit / give-up, masquerade as not-configured so the rest
+	// of the OSD reverts to stock menu behavior for the rest of this session.
+	// Reboot re-execs MiSTer and resets this back to the file-existence cache.
+	if (s_escaped) return false;
 	static int cached = -1;
 	if (cached < 0) cached = FileExists(s_launcher_path, 0) ? 1 : 0;
 	return cached != 0;
@@ -231,6 +237,7 @@ static void return_to_normal_mode(void)
 	s_respawn_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = true;
+	s_escaped = true;
 }
 
 static void reset_launcher_state(void)
@@ -240,6 +247,7 @@ static void reset_launcher_state(void)
 	s_crash_count = 0;
 	s_gave_up = false;
 	s_init_pending = false;
+	s_escaped = false;
 }
 
 static void kill_launcher(pid_t pid, int sig)
