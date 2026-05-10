@@ -51,6 +51,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "menu.h"
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/alt_launcher_menu.h"
+#include "support/zaparoo/display_menu.h"
 #include "support/zaparoo/menu_rbf.h"
 #include "user_io.h"
 #include "debug.h"
@@ -84,6 +85,11 @@ enum MENU
 	MENU_COMMON2,
 	MENU_MISC1,
 	MENU_MISC2,
+
+	// Right-side companion to System Settings on the alt-launcher menu core.
+	// Hosts H/V offset adjustment and the CRT mode toggle.
+	MENU_ZAPAROO_DISPLAY1,
+	MENU_ZAPAROO_DISPLAY2,
 
 	MENU_SELECT_INI1,
 	MENU_SELECT_INI2,
@@ -6888,8 +6894,57 @@ void HandleUI(void)
 		{
 			menustate = MENU_MISC1;
 		}
+		else if (right && alt_launcher_configured())
+		{
+			menustate = MENU_ZAPAROO_DISPLAY1;
+			menusub = 0;
+		}
 
 		if (!hold_cnt && reboot_req) fpga_load_rbf(menu_rbf_name());
+		break;
+
+		/******************************************************************/
+		/* zaparoo display centering page (right-side sibling of System)  */
+		/******************************************************************/
+	case MENU_ZAPAROO_DISPLAY1:
+		if (!alt_launcher_configured())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		parentstate = menustate;
+		display_menu_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_DISPLAY2;
+		break;
+
+	case MENU_ZAPAROO_DISPLAY2:
+		if (menu)
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		if (left)
+		{
+			menustate = MENU_SYSTEM1;
+			menusub = 0;
+			break;
+		}
+		if (plus || minus)
+		{
+			display_menu_adjust(menusub, plus ? +1 : -1);
+			menustate = MENU_ZAPAROO_DISPLAY1;
+			break;
+		}
+		if (select)
+		{
+			if (!display_menu_handle_select(menusub))
+			{
+				menustate = MENU_NONE1;
+				break;
+			}
+			menustate = MENU_ZAPAROO_DISPLAY1;
+		}
 		break;
 
 	case MENU_JOYSYSMAP:

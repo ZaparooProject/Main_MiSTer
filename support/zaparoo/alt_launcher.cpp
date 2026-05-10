@@ -74,6 +74,17 @@ static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
 static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
 static const char s_crt_state_file[] = "zaparoo_launcher_crt.bin";
+static const char s_offsets_file[] = "zaparoo_video_offsets.bin";
+
+static int8_t s_h_offset = 0;
+static int8_t s_v_offset = 0;
+
+static int8_t clamp_offset(int8_t v)
+{
+	if (v < -8) return -8;
+	if (v > 7) return 7;
+	return v;
+}
 
 static bool load_persisted_native_crt(void)
 {
@@ -86,6 +97,20 @@ static void save_persisted_native_crt(bool crt)
 {
 	uint8_t v = crt ? 1 : 0;
 	FileSaveConfig(s_crt_state_file, &v, sizeof(v));
+}
+
+static void load_persisted_offsets(void)
+{
+	int8_t buf[2] = { 0, 0 };
+	FileLoadConfig(s_offsets_file, buf, sizeof(buf));
+	s_h_offset = clamp_offset(buf[0]);
+	s_v_offset = clamp_offset(buf[1]);
+}
+
+static void save_persisted_offsets(void)
+{
+	int8_t buf[2] = { s_h_offset, s_v_offset };
+	FileSaveConfig(s_offsets_file, buf, sizeof(buf));
 }
 
 static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int stride, bool log = true)
@@ -336,6 +361,31 @@ bool alt_launcher_native_crt(void)
 	return s_native_crt && s_pid != 0;
 }
 
+int8_t alt_launcher_h_offset(void)
+{
+	return s_h_offset;
+}
+
+int8_t alt_launcher_v_offset(void)
+{
+	return s_v_offset;
+}
+
+void alt_launcher_set_h_offset(int8_t v)
+{
+	s_h_offset = clamp_offset(v);
+	save_persisted_offsets();
+	// 4-bit two's-complement bit pattern; FPGA reinterprets as signed -8..+7.
+	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));
+}
+
+void alt_launcher_set_v_offset(int8_t v)
+{
+	s_v_offset = clamp_offset(v);
+	save_persisted_offsets();
+	user_io_status_set("[17:14]", (uint32_t)((uint8_t)s_v_offset & 0xF));
+}
+
 void alt_launcher_toggle_crt(void)
 {
 	bool current_crt = alt_launcher_native_crt();
@@ -497,6 +547,11 @@ void zaparoo_alt_launcher_init_for_core(void)
 void zaparoo_alt_launcher_init_for_menu(void)
 {
 	bool crt = load_persisted_native_crt();
-	printf("alt_launcher: initializing menu launcher (persisted crt=%d)\n", crt);
+	load_persisted_offsets();
+	printf("alt_launcher: initializing menu launcher (persisted crt=%d, h=%d, v=%d)\n",
+	       crt, s_h_offset, s_v_offset);
+	// Push the persisted offsets to the FPGA now that the menu RBF is loaded.
+	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));
+	user_io_status_set("[17:14]", (uint32_t)((uint8_t)s_v_offset & 0xF));
 	alt_launcher_init(crt);
 }
