@@ -50,6 +50,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "hardware.h"
 #include "menu.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/menu_rbf.h"
 #include "user_io.h"
 #include "debug.h"
 #include "fpga_io.h"
@@ -1274,7 +1275,7 @@ void HandleUI(void)
 	}
 
 	//prevent OSD control while script is executing on framebuffer
-	if ((!video_fb_state() || video_chvt(0) != 2) && !select_ini)
+	if (((!video_fb_state() || video_chvt(0) != 2) || alt_launcher_active()) && !select_ini)
 	{
 		switch (c)
 		{
@@ -1289,11 +1290,14 @@ void HandleUI(void)
 			if (!ignore_osd_release)
 				menu = true;
 			ignore_osd_release = false;
-			if(video_fb_state()) video_menu_bg(user_io_status_get("[3:1]"));
-			video_fb_enable(0);
+			if (!alt_launcher_active())
+			{
+				if(video_fb_state()) video_menu_bg(user_io_status_get("[3:1]"));
+				video_fb_enable(0);
+			}
 			break;
 		case KEY_F1:
-			if (is_menu() && cfg.fb_terminal)
+			if (!alt_launcher_active() && is_menu() && cfg.fb_terminal)
 			{
 				user_io_status_set("[3:1]", user_io_status_get("[3:1]") + 1);
 				user_io_status_save(user_io_create_config_name());
@@ -1316,7 +1320,7 @@ void HandleUI(void)
 			break;
 
 		case KEY_F9:
-			if ((is_menu() || ((get_key_mod() & (LALT | RALT)) && (get_key_mod() & (LCTRL | RCTRL))) || has_fb_terminal) && cfg.fb_terminal)
+			if (!alt_launcher_active() && (is_menu() || ((get_key_mod() & (LALT | RALT)) && (get_key_mod() & (LCTRL | RCTRL))) || has_fb_terminal) && cfg.fb_terminal)
 			{
 				video_chvt(1);
 				video_fb_enable(!video_fb_state());
@@ -1380,30 +1384,6 @@ void HandleUI(void)
 			break;
 		}
 	}
-	// Alt-launcher exception: while the launcher owns the framebuffer, only
-	// F12 is honoured — to overlay the MiSTer OSD on top of the launcher app
-	// and toggle it back off. F1 (video_menu_bg), F9 (video_fb_enable), etc.
-	// would corrupt or kill the launcher's display, so they're suppressed.
-	// fb_terminal is NOT torn down on F12 release here.
-	else if (alt_launcher_active() && !select_ini)
-	{
-		switch (c)
-		{
-		case KEY_F12:
-			if (user_io_osd_is_visible())
-			{
-				menu = true;
-				ignore_osd_release = true;
-			}
-			break;
-		case KEY_F12 | UPSTROKE:
-			if (!ignore_osd_release)
-				menu = true;
-			ignore_osd_release = false;
-			break;
-		}
-	}
-
 	if (select_ini)
 	{
 		DISKLED_ON;
@@ -3160,7 +3140,7 @@ void HandleUI(void)
 			}
 		}
 
-		if(!hold_cnt && reboot_req) fpga_load_rbf("menu.rbf");
+		if(!hold_cnt && reboot_req) fpga_load_rbf(menu_rbf_name());
 		break;
 
 	case MENU_VIDEOPROC1:
@@ -6920,7 +6900,7 @@ void HandleUI(void)
 			menustate = MENU_MISC1;
 		}
 
-		if (!hold_cnt && reboot_req) fpga_load_rbf("menu.rbf");
+		if (!hold_cnt && reboot_req) fpga_load_rbf(menu_rbf_name());
 		break;
 
 	case MENU_JOYSYSMAP:

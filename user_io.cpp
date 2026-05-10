@@ -41,6 +41,7 @@
 #include "scaler.h"
 #include "support.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/menu_rbf.h"
 
 static char core_path[1024] = {};
 static char rbf_path[1024] = {};
@@ -1453,6 +1454,10 @@ void user_io_init(const char *path, const char *xml)
 		printf("Current exec is %s, core requires exec %s\n", getappname(), main);
 		app_restart(path, xml, main);
 	}
+
+	// Zaparoo: u-boot/stock binary may have loaded the system menu.rbf before we got here.
+	// If our cfg.menu_rbf differs and we booted without an explicit RBF path, force a reload.
+	if (is_menu() && cfg.menu_rbf[0] && !rbf_path[0]) fpga_load_rbf(menu_rbf_name());
 
 	uint8_t hotswap[4] = {};
 	ide_reset(hotswap);
@@ -3032,7 +3037,7 @@ void user_io_set_ini(int ini_num)
 
 	if (!name[0])
 	{
-		name = "menu.rbf";
+		name = menu_rbf_name();
 		xml = NULL;
 	}
 
@@ -3709,7 +3714,7 @@ void user_io_poll()
 
 	if (!coldreset_req && prev_coldreset_req)
 	{
-		fpga_load_rbf("menu.rbf");
+		fpga_load_rbf(menu_rbf_name());
 	}
 
 	prev_coldreset_req = coldreset_req;

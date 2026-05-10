@@ -140,6 +140,7 @@ static const ini_var_t ini_vars[] =
 	{ "XBE2_SHIFT", (void*)(&(cfg.xbe2_shift)), UINT16, 0, 0x22F },
 	{ "SPD_QUIRK", (void*)(&(cfg.spd_quirk)), UINT8, 0, 3 },
 	{ "ALT_LAUNCHER", (void*)(&(cfg.alt_launcher)), STRING, 0, sizeof(cfg.alt_launcher) - 1 },
+	{ "MENU_RBF", (void*)(&(cfg.menu_rbf)), STRING, 0, sizeof(cfg.menu_rbf) - 1 },
 };
 
 static const int nvars = (int)(sizeof(ini_vars) / sizeof(ini_var_t));

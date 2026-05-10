@@ -17,6 +17,7 @@
 #include "shmem.h"
 #include "offload.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/menu_rbf.h"
 
 #include "fpga_base_addr_ac5.h"
 #include "fpga_manager.h"
@@ -441,7 +442,7 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 	printf("Loading RBF: %s\n", name);
 
 	if(name[0] == '/') strcpy(path, name);
-	else sprintf(path, "%s/%s", !strcasecmp(name, "menu.rbf") ? getStorageDir(0) : getRootDir(), name);
+	else sprintf(path, "%s/%s", is_menu_rbf(name) ? getStorageDir(0) : getRootDir(), name);
 
 	int rbf = open(path, O_RDONLY);
 	if (rbf < 0)
@@ -504,7 +505,7 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 	}
 	close(rbf);
 
-	app_restart(!strcasecmp(name, "menu.rbf") ? "menu.rbf" : path, xml);
+	app_restart(is_menu_rbf(name) ? menu_rbf_name() : path, xml);
 	return ret;
 }
 
