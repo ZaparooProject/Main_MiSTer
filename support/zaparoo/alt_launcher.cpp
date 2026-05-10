@@ -9,11 +9,13 @@
 #include <termios.h>
 #include <unistd.h>
 #include <linux/input.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include "cfg.h"
 #include "file_io.h"
 #include "hardware.h"
 #include "input.h"
+#include "shmem.h"
 #include "user_io.h"
 #include "video.h"
 
@@ -93,6 +95,27 @@ static void set_native_crt_fb_mode(bool log = true)
 	set_launcher_fb_mode(8888, 1, 320, 240, 1280, log);
 }
 
+static void blank_native_crt_fb(void)
+{
+	// CRT path doesn't read /dev/fb0 (kernel FB at 0x22000000). The launcher
+	// runs a worker that copies the top-left 320x240 from /dev/fb0 into a
+	// separate FPGA-mapped region at 0x3A000000 (control word + two 320x240
+	// RGBA buffers). The FPGA scans out from that region. Nothing zeros it
+	// across launcher restarts or software reboots, so the previous session's
+	// last frame ghosts in until the launcher's writer thread starts.
+	const uint32_t native_addr = 0x3A000000u;
+	const uint32_t native_size = 0x000A0000u;
+	void *p = shmem_map(native_addr, native_size);
+	if (!p)
+	{
+		printf("alt_launcher: blank native shmem_map(0x%x, %u) failed\n", native_addr, native_size);
+		return;
+	}
+	memset(p, 0, native_size);
+	shmem_unmap(p, native_size);
+	printf("alt_launcher: blanked %u bytes of CRT native video DDR at 0x%x\n", native_size, native_addr);
+}
+
 static void clear_launcher_tty(void)
 {
 	int tty_fd = open(s_tty_path, O_WRONLY | O_CLOEXEC);
@@ -162,7 +185,17 @@ static void enable_native_crt_path(void)
 {
 	set_vga_fb(0);
 	video_fb_enable(0);
+
+	// Double-write with a settle window so the kernel module's 320x240 layout
+	// is live before status[9] flips. Without this, the launcher renders for
+	// up to a second under stale dims (the post-fork retry timer used to be
+	// what eventually fixed the picture).
+	set_native_crt_fb_mode(false);
+	usleep(100000);
 	set_native_crt_fb_mode();
+
+	blank_native_crt_fb();
+
 	user_io_status_set("[9]", 1);
 	s_native_status_timer = GetTimer(500);
 	if (!s_native_status_timer) s_native_status_timer = 1;
