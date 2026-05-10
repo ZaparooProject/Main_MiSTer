@@ -1273,12 +1273,8 @@ void HandleUI(void)
 		}
 	}
 
-	// Prevent OSD control while a script is executing on the framebuffer.
-	// The alt launcher exception lets F12/MENU open the OSD overlay on top
-	// of the running launcher app — the OSD compositor sits post-ascal so
-	// it overlays whatever the launcher renders, and we deliberately skip
-	// the fb_terminal teardown on release so the launcher's display stays.
-	if (((!video_fb_state() || video_chvt(0) != 2) || alt_launcher_active()) && !select_ini)
+	//prevent OSD control while script is executing on framebuffer
+	if ((!video_fb_state() || video_chvt(0) != 2) && !select_ini)
 	{
 		switch (c)
 		{
@@ -1293,11 +1289,8 @@ void HandleUI(void)
 			if (!ignore_osd_release)
 				menu = true;
 			ignore_osd_release = false;
-			if (!alt_launcher_active())
-			{
-				if(video_fb_state()) video_menu_bg(user_io_status_get("[3:1]"));
-				video_fb_enable(0);
-			}
+			if(video_fb_state()) video_menu_bg(user_io_status_get("[3:1]"));
+			video_fb_enable(0);
 			break;
 		case KEY_F1:
 			if (is_menu() && cfg.fb_terminal)
@@ -1384,6 +1377,29 @@ void HandleUI(void)
 			break;
 		case KEY_GRAVE:
 			recent = true;
+			break;
+		}
+	}
+	// Alt-launcher exception: while the launcher owns the framebuffer, only
+	// F12 is honoured — to overlay the MiSTer OSD on top of the launcher app
+	// and toggle it back off. F1 (video_menu_bg), F9 (video_fb_enable), etc.
+	// would corrupt or kill the launcher's display, so they're suppressed.
+	// fb_terminal is NOT torn down on F12 release here.
+	else if (alt_launcher_active() && !select_ini)
+	{
+		switch (c)
+		{
+		case KEY_F12:
+			if (user_io_osd_is_visible())
+			{
+				menu = true;
+				ignore_osd_release = true;
+			}
+			break;
+		case KEY_F12 | UPSTROKE:
+			if (!ignore_osd_release)
+				menu = true;
+			ignore_osd_release = false;
 			break;
 		}
 	}
