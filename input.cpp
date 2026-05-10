@@ -3564,7 +3564,7 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 					if (osd_event == 2) joy_digital(input[dev].num, 0, 0, 0, BTN_OSD);
 				}
 
-				if (user_io_osd_is_visible() || video_fb_state())
+				if (user_io_osd_is_visible() || video_fb_state() || alt_launcher_active())
 				{
 					if (ev->value <= 1)
 					{
