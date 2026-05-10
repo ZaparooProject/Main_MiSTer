@@ -32,11 +32,14 @@ non-blocking spawn) are intentionally omitted.
 | 10 | **Native-core auto-init** | `zaparoo_is_native_core()` matches core name `"Zaparoo Launcher"`; `zaparoo_alt_launcher_init_for_core()` auto-spawns when the FPGA loads that core | `support/zaparoo/alt_launcher.cpp:480-495`, `user_io.cpp:1543` |
 | 11 | **In-core "Launcher" OSD entry** | Adds row 31 (`ALT_LAUNCHER_MENUSUB`) to MENU_COMMON1 marked with `reboot_req` when activated | `menu.cpp:2831,2845-2849,3088-3091` |
 | 12 | **OSD/F12 overlay over running launcher** | F12 / `KEY_MENU` reaches the OSD even with launcher running; on menu core opens System Settings directly (skip file picker); F1/F9 disabled when launcher active; `vga_nag` suppressed; auto-open suppressed in CRT mode | `menu.cpp:843-852,1289,1304-1311,1334,1583,1604-1611,6727,6739,6816,6901`, `user_io.cpp:4162-4171` |
-| 13 | **Trimmed System Settings render** | `alt_launcher_render_system_menu()` overrides MENU_SYSTEM1 body for the alt-launcher path; `alt_launcher_translate_system_select()` maps trimmed menusub indices to upstream dispatch slots | `support/zaparoo/alt_launcher_menu.cpp`, `menu.cpp:6739-6745,6816-6821` |
-| 14 | **Right-side Display Centering page** | New menu state hosting H/V offset adjustment + relocated CRT toggle; persisted via 2-byte `zaparoo_video_offsets.bin`; pushed via `user_io_status_set("[13:10]" / "[17:14]")` | `support/zaparoo/display_menu.cpp/.h` *(local rename in progress: `launcher_pages.cpp/.h`)*, `support/zaparoo/alt_launcher.cpp` (offset state + setters), `menu.cpp` `MENU_ZAPAROO_DISPLAY*` cases |
-| 15 | **Escape-to-stock semantics** | Sticky `s_escaped` flag makes `alt_launcher_configured()` return `false` after a clean exit, so the rest of the session reverts to stock OSD; reboot resets it | `support/zaparoo/alt_launcher.cpp:32,38-43,229-241` |
-| 16 | **CI / build infrastructure** | Docker container build; binary named `MiSTer_Zaparoo`; "Z"-suffixed version; release / unstable CI; sync-upstream workflow; deploy script | `docker-build.sh`, `stable-build.sh`, `unstable-build.sh`, `deploy-zaparoo.sh`, `.github/build_*.sh`, `.github/workflows/*.yml` |
-| 17 | **Build-time defaults flipped** | `cfg.recents` and `LOG_FILE_ENTRY` default to enabled in Zaparoo builds | `cfg.cpp` (defaults) |
+| 13 | **Trimmed System Settings render** | `alt_launcher_render_system_menu()` overrides MENU_SYSTEM1 body for the alt-launcher path; `alt_launcher_translate_system_select()` maps trimmed menusub indices (Remap, Define joy, Scripts, Reboot, Exit) to upstream dispatch slots | `support/zaparoo/alt_launcher_menu.cpp`, `menu.cpp:6739-6745,6816-6821` |
+| 14 | **Right-side Zaparoo Launcher pages (two-page)** | Right-arrow from System Settings enters `MENU_ZAPAROO_LAUNCHER1/2` (top page: Video, Exit). Selecting Video enters `MENU_ZAPAROO_VIDEO1/2` (sub-page: CRT mode, H Offset, V Offset, Exit) where left/right adjust values and `±` also work. Both pages live in one helper file with split renderers / select handlers per page | `support/zaparoo/launcher_pages.cpp/.h` (`launcher_page_*`, `video_page_*`), `support/zaparoo/alt_launcher.cpp` (offset state + setters), `menu.cpp` `MENU_ZAPAROO_LAUNCHER*` and `MENU_ZAPAROO_VIDEO*` cases |
+| 15 | **H/V offset persistence and push** | 2-byte `zaparoo_video_offsets.bin` via `FileSaveConfig` / `FileLoadConfig`; loaded at menu init alongside the CRT byte; values pushed to FPGA via `user_io_status_set("[13:10]" / "[17:14]")` so the change takes effect immediately | `support/zaparoo/alt_launcher.cpp` (`load_persisted_offsets`, `save_persisted_offsets`, `alt_launcher_set_h_offset`/`_v_offset`, `zaparoo_alt_launcher_init_for_menu`) |
+| 16 | **OSD auto-dismiss on launcher spawn** | `spawn()` calls `MenuHide()` after fork so an OSD still up from CRT toggle / Reboot doesn't trap input once the launcher grabs the input device | `support/zaparoo/alt_launcher.cpp` (end of `spawn`) |
+| 17 | **CRT-mode-on-exit safety** | If the launcher exits while in CRT mode (clean or crashed), drop back to HDMI / normal mode for the rest of this session instead of respawning into CRT — avoids a UX trap where the user just left CRT but the launcher would respawn into it. Persisted preference is left untouched so next reboot honors it | `support/zaparoo/alt_launcher.cpp` `alt_launcher_poll()` post-`waitpid` branch |
+| 18 | **Escape-to-stock semantics** | Sticky `s_escaped` flag makes `alt_launcher_configured()` return `false` after a clean exit, so the rest of the session reverts to stock OSD; reboot resets it | `support/zaparoo/alt_launcher.cpp:32,38-43,229-241` |
+| 19 | **CI / build infrastructure** | Docker container build; binary named `MiSTer_Zaparoo`; "Z"-suffixed version; release / unstable CI; sync-upstream workflow; deploy script | `docker-build.sh`, `stable-build.sh`, `unstable-build.sh`, `deploy-zaparoo.sh`, `.github/build_*.sh`, `.github/workflows/*.yml` |
+| 20 | **Build-time defaults flipped** | `cfg.recents` and `LOG_FILE_ENTRY` default to enabled in Zaparoo builds | `cfg.cpp` (defaults) |
 
 ---
 
@@ -133,12 +136,16 @@ It can shrink to one line:
 ```
 
 ### 2.7 Trimmed-menu dispatcher has a dead branch
-`alt_launcher_translate_system_select()` returns `-1` to signal "consumed
-inline." That existed for the CRT row, which has now moved to the right page.
+`alt_launcher_translate_system_select()` no longer returns `-1` in any
+reachable path — the only case that used to (CRT toggle handled inline) is
+gone now that CRT lives on the Video sub-page. The remaining `return -1`
+for out-of-range `menusub` is dead too since the framework bounds menusub
+via `menumask = 0x1F`.
 
 The `if (dispatch < 0) { menustate = MENU_SYSTEM1; break; }` branch in
-`MENU_SYSTEM2`'s switch is currently unreachable. Either drop it or note that
-it's reserved for future inline-handled rows.
+`MENU_SYSTEM2`'s switch is therefore unreachable. Either drop the `-1`
+contract entirely or document that it's reserved for future inline-handled
+rows.
 
 ### 2.8 `alt_launcher.cpp` is doing too many jobs
 ~600 lines covering: process lifecycle + video state machine + tty handling
@@ -158,12 +165,29 @@ At minimum, log it once at startup:
 printf("alt_launcher: forcing fb_terminal=1, recents=1 (Zaparoo build)\n");
 ```
 
-### 2.10 Naming drift in the new menu page
-The right-side page was committed as `MENU_ZAPAROO_DISPLAY1/2` with files
-`display_menu.{cpp,h}`. Local in-progress refactor renames the menu states
-to `MENU_ZAPAROO_VIDEO*` / `MENU_ZAPAROO_LAUNCHER*` and the file to
-`launcher_pages.{cpp,h}`. After the rename settles, double-check that the
-file name and the symbols inside agree on what the page is called.
+### 2.10 Naming of new menu pages — resolved
+Earlier note about `MENU_ZAPAROO_DISPLAY*` vs in-progress rename is resolved:
+the right-side surface is now two pages, `MENU_ZAPAROO_LAUNCHER*` (top) and
+`MENU_ZAPAROO_VIDEO*` (sub-page), with renderers `launcher_page_*` and
+`video_page_*` both living in `support/zaparoo/launcher_pages.{cpp,h}`.
+File name and symbols agree. ✅
+
+### 2.11 Two ways to dismiss the OSD on launcher spawn
+The launcher's `spawn()` calls `MenuHide()` to drop a still-open OSD before
+the launcher grabs input, which is the new safety net (entry 16 in the
+table). Independently, `MENU_SYSTEM2`'s F12 handler also forces
+`MENU_NONE1` when `alt_launcher_configured()` is true. Both are needed —
+spawn-side handles the "Reboot from System Settings" path, F12-side
+handles the "user opens and closes OSD without spawning" path — but the
+overlap is implicit. Worth a code comment naming each owner.
+
+### 2.12 CRT-mode-on-exit drops launcher entirely
+Entry 17 in the table: if the launcher exits while in CRT mode, the fork
+permanently drops back to HDMI for the session, even on a clean exit (not
+just crashes). That's intentional UX to avoid a trap, but it means a user
+who exits the launcher in CRT mode and wants to come back has to reboot.
+Worth documenting in the launcher's own README, or relaxing the rule for
+clean exits if respawn-into-CRT turns out to be valuable.
 
 ---
 
