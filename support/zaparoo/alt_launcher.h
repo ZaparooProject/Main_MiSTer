@@ -3,7 +3,6 @@
 #include <stdint.h>
 
 #define ALT_LAUNCHER_MENUSUB     31
-#define ALT_LAUNCHER_CRT_MENUSUB 30
 
 void alt_launcher_init(bool native_crt);
 void alt_launcher_poll(void);

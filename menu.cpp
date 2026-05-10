@@ -50,6 +50,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "hardware.h"
 #include "menu.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/alt_launcher_menu.h"
 #include "support/zaparoo/menu_rbf.h"
 #include "user_io.h"
 #include "debug.h"
@@ -573,7 +574,7 @@ static uint32_t menu_key_get(void)
 		else if (CheckTimer(repeat))
 		{
 			repeat = GetTimer(REPEATRATE);
-			if (GetASCIIKey(c1) || menustate == MENU_FILE_SELECT2 || ((menustate == MENU_COMMON2) && (menusub == 17)) || ((menustate == MENU_SYSTEM2) && (menusub == 5)))
+			if (GetASCIIKey(c1) || menustate == MENU_FILE_SELECT2 || ((menustate == MENU_COMMON2) && (menusub == 17)) || ((menustate == MENU_SYSTEM2) && (menusub == 5)) || ((menustate == MENU_SYSTEM2) && alt_launcher_system_holding_reboot(menusub)))
 			{
 				c = c1;
 				hold_cnt++;
@@ -2835,10 +2836,6 @@ void HandleUI(void)
 				{
 					menumask |= (1ULL << ALT_LAUNCHER_MENUSUB);
 					MenuWrite(n++, " Launcher", menusub == ALT_LAUNCHER_MENUSUB, 0);
-
-					menumask |= (1ULL << ALT_LAUNCHER_CRT_MENUSUB);
-					sprintf(s, " CRT mode: %s", alt_launcher_native_crt() ? "On" : "Off");
-					MenuWrite(n++, s, menusub == ALT_LAUNCHER_CRT_MENUSUB, 0);
 				}
 
 				MenuWrite(n++, " Core                      \x16", menusub == 0, 0);
@@ -3085,11 +3082,6 @@ void HandleUI(void)
 
 			case ALT_LAUNCHER_MENUSUB:
 				reboot_req = 1;
-				break;
-
-			case ALT_LAUNCHER_CRT_MENUSUB:
-				alt_launcher_toggle_crt();
-				menustate = MENU_COMMON1;
 				break;
 
 			default:
@@ -6732,10 +6724,18 @@ void HandleUI(void)
 		helptext_idx = 0;
 		parentstate = menustate;
 
+		// alt-launcher mode delegates the entire System menu render to a
+		// support helper so this upstream block stays untouched.
+		if (alt_launcher_configured())
+		{
+			cr = alt_launcher_render_system_menu(menusub, &menumask, &reboot_req, &sysinfo_timer);
+			menustate = MENU_SYSTEM2;
+			break;
+		}
+
 		m = 0;
 		OsdSetTitle("System Settings", OSD_ARROW_LEFT);
 		menumask = 0x7F;
-		if (alt_launcher_configured()) menumask |= (1ULL << 7);
 
 		OsdWrite(m++);
 		sprintf(s, "       MiSTer v%s", version + 5);
@@ -6788,11 +6788,6 @@ void HandleUI(void)
 		OsdWrite(m++, " Define joystick buttons   \x16", menusub == 2);
 		OsdWrite(m++, " Scripts                   \x16", menusub == 3);
 		OsdWrite(m++, " Help                      \x16", menusub == 4);
-		if (alt_launcher_configured())
-		{
-			sprintf(s, " CRT mode: %-15s", alt_launcher_native_crt() ? "On" : "Off");
-			OsdWrite(m++, s, menusub == 7);
-		}
 		OsdWrite(m++, "");
 		cr = m;
 		OsdWrite(m++, " Reboot (hold \x16 cold reboot)", menusub == 5);
@@ -6820,7 +6815,9 @@ void HandleUI(void)
 		}
 		else if (select)
 		{
-			switch (menusub)
+			int dispatch = alt_launcher_translate_system_select(menusub);
+			if (dispatch < 0) { menustate = MENU_SYSTEM1; break; }
+			switch (dispatch)
 			{
 			case 0:
 				if (getStorage(1) || isUSBMounted()) setStorage(!getStorage(1));
@@ -6884,14 +6881,6 @@ void HandleUI(void)
 
 			case 6:
 				menustate = MENU_NONE1;
-				break;
-
-			case 7:
-				if (alt_launcher_configured())
-				{
-					alt_launcher_toggle_crt();
-					menustate = MENU_SYSTEM1;
-				}
 				break;
 			}
 		}
