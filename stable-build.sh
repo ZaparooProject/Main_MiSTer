@@ -84,9 +84,20 @@ git worktree add --detach "${TMP_WORKTREE}" "${STABLE_COMMIT}" >/dev/null
 # for a shared file has drifted from upstream master. MiSTer.ini is excluded:
 # the fork's only change is an uncomment of a default-valued line, and stable's
 # example ini drifts often enough to cause spurious conflicts.
-FORK_DIFF=$(git diff --binary "${UPSTREAM_REF}..${FORK_HEAD}" -- . ':(exclude)MiSTer.ini')
+FORK_DIFF=$(git diff --binary "${UPSTREAM_REF}..${FORK_HEAD}" -- . \
+    ':(exclude)MiSTer.ini' \
+    ':(exclude)input.cpp' \
+    ':(exclude)scheduler.cpp')
 if [ -n "${FORK_DIFF}" ]; then
     printf '%s\n' "${FORK_DIFF}" | git -C "${TMP_WORKTREE}" apply -3 --index
+fi
+
+# These hook files drift across stable/master often. Apply the fork-only hunks
+# without surrounding upstream-master context so old stable releases can still
+# receive the small Zaparoo hook additions.
+FORK_HOOK_DIFF=$(git diff --binary -U0 "${UPSTREAM_REF}..${FORK_HEAD}" -- input.cpp scheduler.cpp)
+if [ -n "${FORK_HOOK_DIFF}" ]; then
+    printf '%s\n' "${FORK_HOOK_DIFF}" | git -C "${TMP_WORKTREE}" apply --unidiff-zero --index
 fi
 
 "${TMP_WORKTREE}/docker-build.sh" "$@"
