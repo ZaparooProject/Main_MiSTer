@@ -8,6 +8,7 @@
 #include "fpga_io.h"
 #include "osd.h"
 #include "profiling.h"
+#include "video.h"
 #include "support/zaparoo/alt_launcher.h"
 
 static cothread_t co_scheduler = nullptr;
@@ -35,6 +36,7 @@ static void scheduler_co_poll(void)
 			frame_timer();
 			input_poll(0);
 			alt_launcher_poll();
+			video_poll();
 		}
 
 		scheduler_yield();
