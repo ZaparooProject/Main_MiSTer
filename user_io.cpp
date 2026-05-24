@@ -4207,7 +4207,7 @@ void user_io_kbd(uint16_t key, int press)
 			uint32_t code = get_ps2_code(key);
 			// Both F12 and KEY_MENU now reach the normal menu/OSD flow even
 			// while the alt launcher is running, so the user can open the OSD
-			// overlay (System Settings) on top of their launcher app from
+			// overlay (System Settings) on top of the frontend from
 			// either keyboard or joypad MENU button. Input grabbing flips
 			// automatically when the OSD opens (user_io_osd_key_enable ->
 			// input_switch -> EVIOCGRAB).

@@ -87,7 +87,7 @@ enum MENU
 	MENU_MISC2,
 
 	// Right-side companion to System Settings on the alt-launcher menu core.
-	// Top "Zaparoo Launcher" page lists sub-pages (Video) and an exit row;
+	// Top "Zaparoo Frontend" page lists sub-pages (Video) and an exit row;
 	// the Video sub-page hosts CRT mode + H/V centering offsets and binds
 	// left/right arrows to value adjustment.
 	MENU_ZAPAROO_LAUNCHER1,
@@ -858,7 +858,7 @@ static void vga_nag()
 {
 	// With an alt launcher configured the user has fb_terminal on by design
 	// and the CRT is fed directly by the menu core (snow pattern when status[9]=0,
-	// or the launcher's framebuffer when status[9]=1). The "fix MiSTer.ini"
+	// or the frontend's framebuffer when status[9]=1). The "fix MiSTer.ini"
 	// nag is not appropriate — just leave the OSD off without the warning.
 	if (video_fb_state() && !alt_launcher_configured())
 	{
@@ -1589,7 +1589,7 @@ void HandleUI(void)
 		}
 		// On the menu core without an alt launcher, the menu *is* the screen —
 		// keep auto-opening the OSD whenever fb_terminal is off. With an alt
-		// launcher running, that rule would re-open System Settings the moment
+		// frontend running, that rule would re-open System Settings the moment
 		// the user closes it (in CRT mode video_fb_state is false), so the OSD
 		// could never actually close. Suppress the auto-open in that case;
 		// explicit F12/MENU presses still open and close it normally.
@@ -2858,7 +2858,7 @@ void HandleUI(void)
 				if (alt_launcher_configured())
 				{
 					menumask |= (1ULL << ALT_LAUNCHER_MENUSUB);
-					MenuWrite(n++, " Launcher", menusub == ALT_LAUNCHER_MENUSUB, 0);
+					MenuWrite(n++, " Frontend", menusub == ALT_LAUNCHER_MENUSUB, 0);
 				}
 
 				MenuWrite(n++, " Core                      \x16", menusub == 0, 0);
@@ -6738,7 +6738,7 @@ void HandleUI(void)
 		// Without an alt launcher, the wallpaper / fb_terminal flow can't coexist
 		// with this menu — bail out so vga_nag can show the MiSTer.ini warning.
 		// With an alt launcher the OSD overlay is exactly what we want on top of
-		// the running launcher, so let it render through.
+		// the running frontend, so let it render through.
 		if (video_fb_state() && !alt_launcher_configured())
 		{
 			menustate = MENU_NONE1;
@@ -6923,7 +6923,7 @@ void HandleUI(void)
 		break;
 
 		/******************************************************************/
-		/* zaparoo launcher pages (right-side sibling of System)          */
+		/* zaparoo frontend pages (right-side sibling of System)          */
 		/******************************************************************/
 	case MENU_ZAPAROO_LAUNCHER1:
 		if (!alt_launcher_configured())

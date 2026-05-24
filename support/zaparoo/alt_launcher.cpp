@@ -20,12 +20,12 @@
 #include "user_io.h"
 #include "video.h"
 
-static const char s_launcher_path[] = "zaparoo/launcher";
+static const char s_launcher_path[] = "zaparoo/frontend";
 
 void alt_launcher_cfg_apply(void)
 {
 	// Override any user ini values: this fork is single-purpose and the
-	// launcher needs both flags on to render.
+	// frontend needs both flags on to render.
 	cfg.fb_terminal = 1;
 	cfg.recents = 1;
 }
@@ -136,12 +136,12 @@ static void set_native_crt_fb_mode(bool log = true)
 
 static void blank_native_crt_fb(void)
 {
-	// CRT path doesn't read /dev/fb0 (kernel FB at 0x22000000). The launcher
+	// CRT path doesn't read /dev/fb0 (kernel FB at 0x22000000). The frontend
 	// runs a worker that copies the top-left 320x240 from /dev/fb0 into a
 	// separate FPGA-mapped region at 0x3A000000 (control word + two 320x240
 	// RGBA buffers). The FPGA scans out from that region. Nothing zeros it
-	// across launcher restarts or software reboots, so the previous session's
-	// last frame ghosts in until the launcher's writer thread starts.
+	// across frontend restarts or software reboots, so the previous session's
+	// last frame ghosts in until the frontend's writer thread starts.
 	const uint32_t native_addr = 0x3A000000u;
 	const uint32_t native_size = 0x000A0000u;
 	void *p = shmem_map(native_addr, native_size);
@@ -226,7 +226,7 @@ static void enable_native_crt_path(void)
 	video_fb_enable(0);
 
 	// Double-write with a settle window so the kernel module's 320x240 layout
-	// is live before status[9] flips. Without this, the launcher renders for
+	// is live before status[9] flips. Without this, the frontend renders for
 	// up to a second under stale dims (the post-fork retry timer used to be
 	// what eventually fixed the picture).
 	set_native_crt_fb_mode(false);
@@ -351,7 +351,7 @@ static void spawn(void)
 		user_io_status_set("[9]", 1);
 	}
 
-	// The launcher grabs input as soon as it starts. If the OSD is still
+	// The frontend grabs input as soon as it starts. If the OSD is still
 	// up (e.g. user toggled CRT mode or hit Reboot from System Settings),
 	// it would trap input with no way to dismiss it — drop it now.
 	if (menu_present()) MenuHide();
@@ -402,8 +402,8 @@ void alt_launcher_toggle_crt(void)
 	printf("alt_launcher: toggle CRT path %d -> %d\n", current_crt, target_crt);
 
 	// Shutdown drops status[9], releases the FB mode and restores HPS framebuffer
-	// state regardless of whether the launcher was running. After it returns we
-	// always have a clean slate to spawn the next launcher invocation.
+	// state regardless of whether the frontend was running. After it returns we
+	// always have a clean slate to spawn the next frontend invocation.
 	alt_launcher_shutdown();
 	alt_launcher_init(target_crt);
 }
@@ -445,7 +445,7 @@ void alt_launcher_poll(void)
 			int sig = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
 			bool escaped = (exited && exit_status == 0) || sig == SIGTERM || sig == SIGINT;
 			bool crashed = !escaped && (sig != 0 || (exited && exit_status != 0));
-			// Any exit while in CRT mode drops back to HDMI / no launcher
+			// Any exit while in CRT mode drops back to HDMI / no frontend
 			// for the rest of this session — respawning into CRT after the
 			// user already left it is a UX trap. The persisted CRT
 			// preference is intentionally untouched (return_to_normal_mode
@@ -566,7 +566,7 @@ void zaparoo_alt_launcher_init_for_menu(void)
 {
 	bool crt = load_persisted_native_crt();
 	load_persisted_offsets();
-	printf("alt_launcher: initializing menu launcher (persisted crt=%d, h=%d, v=%d)\n",
+	printf("alt_launcher: initializing menu frontend (persisted crt=%d, h=%d, v=%d)\n",
 	       crt, s_h_offset, s_v_offset);
 	// Push the persisted offsets to the FPGA now that the menu RBF is loaded.
 	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));

@@ -11,7 +11,7 @@
 void launcher_page_render(int menusub, uint64_t *menumask)
 {
 	OsdSetSize(16);
-	OsdSetTitle("Zaparoo Launcher", OSD_ARROW_LEFT);
+	OsdSetTitle("Zaparoo Frontend", OSD_ARROW_LEFT);
 	*menumask = 0x3; // Video, Exit
 
 	int m = 0;

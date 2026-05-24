@@ -23,7 +23,7 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
 	char s[256];
 	int m = 0;
 
-	// Right arrow indicates a sibling page (Zaparoo Launcher) accessible
+	// Right arrow indicates a sibling page (Zaparoo Frontend) accessible
 	// via the right-arrow key — see MENU_ZAPAROO_LAUNCHER1 in menu.cpp.
 	OsdSetTitle("System Settings", OSD_ARROW_LEFT | OSD_ARROW_RIGHT);
 	*menumask = 0x1F;
@@ -81,7 +81,7 @@ int alt_launcher_translate_system_select(int menusub)
 
 	// Maps trimmed-menu menusub to upstream MENU_SYSTEM2 dispatch index:
 	// 0 Remap -> 1, 1 Define joy -> 2, 2 Scripts -> 3, 3 Reboot -> 5,
-	// 4 Exit -> 6. CRT mode lives on the Zaparoo Launcher's Video
+	// 4 Exit -> 6. CRT mode lives on the Zaparoo Frontend's Video
 	// sub-page now, not here.
 	static const int map[] = { 1, 2, 3, 5, 6 };
 	if (menusub < 0 || menusub >= (int)(sizeof(map) / sizeof(map[0]))) return -1;
