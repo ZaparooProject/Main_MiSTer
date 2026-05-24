@@ -547,7 +547,7 @@ void alt_launcher_shutdown(void)
 
 bool zaparoo_is_native_core(void)
 {
-	static const char *name = "Zaparoo Launcher";
+	static const char *name = "Zaparoo Frontend";
 	return !strcasecmp(user_io_get_core_name(0), name) ||
 	       !strcasecmp(user_io_get_core_name(1), name);
 }
