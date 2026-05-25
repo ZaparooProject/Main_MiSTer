@@ -7139,6 +7139,7 @@ void HandleUI(void)
 	case MENU_SCRIPTS_FB:
 		if (cfg.fb_terminal)
 		{
+			alt_launcher_prepare_for_script();
 			memcpy(Selected_F[0], selPath, sizeof(Selected_F[0]));
 			static char cmd[1024 * 2];
 			const char *path = getFullPath(selPath);
@@ -7179,6 +7180,7 @@ void HandleUI(void)
 			{
 				video_menu_bg(user_io_status_get("[3:1]"));
 				video_fb_enable(0);
+				alt_launcher_resume_after_script();
 				menustate = MENU_SYSTEM1;
 				menusub = 3;
 				OsdClear();

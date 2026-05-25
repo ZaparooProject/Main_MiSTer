@@ -9,6 +9,9 @@
 #include <termios.h>
 #include <unistd.h>
 #include <linux/input.h>
+#include <linux/kd.h>
+#include <linux/vt.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include "cfg.h"
@@ -70,6 +73,8 @@ static unsigned long s_native_fb_mode_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
 static bool s_native_crt = false;
+static bool s_resume_after_script = false;
+static bool s_script_resume_crt = false;
 static const int s_vt = 2;
 static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
@@ -171,6 +176,13 @@ static void reset_launcher_tty(void)
 	int tty_fd = open(s_tty_path, O_RDWR | O_NOCTTY | O_CLOEXEC);
 	if (tty_fd >= 0)
 	{
+		ioctl(tty_fd, KDSETMODE, KD_TEXT);
+		ioctl(tty_fd, KDSKBMODE, K_XLATE);
+		struct vt_mode vtmode;
+		memset(&vtmode, 0, sizeof(vtmode));
+		vtmode.mode = VT_AUTO;
+		ioctl(tty_fd, VT_SETMODE, &vtmode);
+
 		struct termios tio;
 		if (!tcgetattr(tty_fd, &tio))
 		{
@@ -274,12 +286,55 @@ static void reset_launcher_state(void)
 	s_gave_up = false;
 	s_init_pending = false;
 	s_escaped = false;
+	s_resume_after_script = false;
+	s_script_resume_crt = false;
 }
 
 static void kill_launcher(pid_t pid, int sig)
 {
 	if (kill(-pid, sig) && errno == ESRCH)
 		kill(pid, sig);
+}
+
+static void wait_launcher_stopped(pid_t pid)
+{
+	kill_launcher(pid, SIGTERM);
+	for (int i = 0; i < 50; i++)
+	{
+		if (waitpid(pid, NULL, WNOHANG) == pid)
+		{
+			s_pid = 0;
+			break;
+		}
+		usleep(10000);
+	}
+	if (s_pid)
+	{
+		kill_launcher(pid, SIGKILL);
+		// Bounded — don't wedge the UI if the task is stuck in D-state.
+		for (int i = 0; i < 100; i++)
+		{
+			if (waitpid(pid, NULL, WNOHANG) == pid)
+			{
+				s_pid = 0;
+				break;
+			}
+			usleep(10000);
+		}
+	}
+}
+
+static void release_launcher_video(void)
+{
+	if (s_native_crt)
+	{
+		s_native_crt = false;
+		disable_native_crt_path();
+	}
+	else
+	{
+		video_fb_enable(0);
+	}
 }
 
 static void spawn(void)
@@ -416,6 +471,43 @@ void alt_launcher_init(bool native_crt)
 	s_respawn_timer = 0;
 	s_native_crt = native_crt;
 	s_init_pending = true;
+}
+
+void alt_launcher_prepare_for_script(void)
+{
+	reset_launcher_tty();
+	if (!s_pid)
+		return;
+
+	printf("alt_launcher: suspending launcher for script\n");
+	s_resume_after_script = true;
+	s_script_resume_crt = s_native_crt;
+	pid_t pid = s_pid;
+	wait_launcher_stopped(pid);
+	user_io_osd_key_enable(1);
+	s_respawn_timer = 0;
+	s_crash_count = 0;
+	s_init_pending = false;
+	s_gave_up = false;
+	release_launcher_video();
+	reset_launcher_tty();
+}
+
+void alt_launcher_resume_after_script(void)
+{
+	if (!s_resume_after_script)
+	{
+		reset_launcher_tty();
+		return;
+	}
+
+	bool crt = s_script_resume_crt;
+	s_resume_after_script = false;
+	s_script_resume_crt = false;
+	s_gave_up = false;
+	s_escaped = false;
+	printf("alt_launcher: resuming launcher after script (crt=%d)\n", crt);
+	alt_launcher_init(crt);
 }
 
 void alt_launcher_poll(void)
