@@ -36,6 +36,7 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "file_io.h"
+#include "cheat_cmd.h"
 #include "support/zaparoo/alt_launcher.h"
 
 #define NUMDEV 30
@@ -6238,6 +6239,7 @@ int input_test(int getchar)
 					printf("MiSTer_cmd: %s\n", cmd);
 					if (!strncmp(cmd, "fb_cmd", 6)) video_cmd(cmd);
 					else if (!strncmp(cmd, "video_mode ", 11)) video_mode_cmd(cmd + 11);
+					else if (!strncmp(cmd, "cheat ", 6)) cheat_cmd(cmd + 6);
 					else if (!strncmp(cmd, "load_core ", 10))
 					{
 						if(isXmlName(cmd)) xml_load(cmd + 10);
