@@ -1,11 +1,12 @@
+#include "cheat_cmd.h"
+
+#include <ctype.h>
+#include <inttypes.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
-#include <stdbool.h>
-#include <inttypes.h>
 
 #include "cheats.h"
-#include "cheat_cmd.h"
 
 static const char *skip_space(const char *s)
 {
@@ -40,7 +41,7 @@ static const char *cheat_cmd_status(int status)
 	}
 }
 
-void cheat_cmd(const char *cmd)
+void zaparoo_cheat_cmd(const char *cmd)
 {
 	char action[16];
 

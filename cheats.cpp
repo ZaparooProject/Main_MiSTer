@@ -348,7 +348,6 @@ void cheats_print()
 static void cheats_send()
 {
 	static uint8_t buff[CHEAT_SIZE];
-	memset(buff, 0, sizeof(buff));
 	int pos = 0;
 
 	for (int i = 0; i < cheats_available(); i++)
@@ -472,84 +471,6 @@ static int cheats_find_by_name(const char *name)
 	return -1;
 }
 
-static int cheats_external_load_entry(int idx)
-{
-	if (idx < 0 || idx >= cheats_available()) return CHEATS_CMD_NOT_FOUND;
-	if (cheats[idx].cheatData) return CHEATS_CMD_OK;
-	if (!cheat_zip[0]) return CHEATS_CMD_LOAD_FAILED;
-
-	static char filename[1024];
-	fileTYPE f = {};
-	snprintf(filename, sizeof(filename), "%s/%s", cheat_zip, cheats[idx].name);
-	if (!FileOpen(&f, filename))
-	{
-		printf("Cannot open cheat file %s.\n", filename);
-		return CHEATS_CMD_LOAD_FAILED;
-	}
-
-	int res = CHEATS_CMD_LOAD_FAILED;
-	int len = f.size;
-	if (!len || (len % cheat_unit_size))
-	{
-		printf("Cheat file %s has incorrect length %d -> skipping.\n", filename, len);
-	}
-	else if (((len / cheat_unit_size) + cheats_loaded()) <= cheat_max_active)
-	{
-		cheats[idx].cheatData = new char[len];
-		if (cheats[idx].cheatData)
-		{
-			if (FileReadAdv(&f, cheats[idx].cheatData, len) == len)
-			{
-				cheats[idx].cheatSize = len;
-				res = CHEATS_CMD_OK;
-			}
-			else
-			{
-				printf("Cannot read cheat file %s.\n", filename);
-				delete[] cheats[idx].cheatData;
-				cheats[idx].cheatData = NULL;
-				cheats[idx].cheatSize = 0;
-			}
-		}
-		else
-		{
-			printf("Could not allocate required memory (%d) for cheat file %s.\n", len, filename);
-		}
-	}
-	else
-	{
-		printf("No more room in current selection for cheat file %s.\n", filename);
-		res = CHEATS_CMD_NO_ROOM;
-	}
-
-	FileClose(&f);
-	return res;
-}
-
-static int cheats_external_set_enabled(int idx, bool enabled)
-{
-	if (!cheats_available()) return CHEATS_CMD_NO_CHEATS;
-	if (idx < 0 || idx >= cheats_available()) return CHEATS_CMD_NOT_FOUND;
-	if (cheats[idx].enabled == enabled) return CHEATS_CMD_OK;
-
-	if (enabled)
-	{
-		int res = cheats_external_load_entry(idx);
-		if (res != CHEATS_CMD_OK) return res;
-		if (((cheats[idx].cheatSize / cheat_unit_size) + cheats_loaded()) > cheat_max_active) return CHEATS_CMD_NO_ROOM;
-	}
-
-	cheats[idx].enabled = enabled;
-	cheats_send();
-	return CHEATS_CMD_OK;
-}
-
-int cheats_set_enabled_by_name(const char *name, bool enabled)
-{
-	if (!cheats_available()) return CHEATS_CMD_NO_CHEATS;
-	return cheats_external_set_enabled(cheats_find_by_name(name), enabled);
-}
-
 int cheats_toggle_by_name(const char *name)
 {
 	if (!cheats_available()) return CHEATS_CMD_NO_CHEATS;
@@ -557,7 +478,24 @@ int cheats_toggle_by_name(const char *name)
 	int idx = cheats_find_by_name(name);
 	if (idx < 0) return CHEATS_CMD_NOT_FOUND;
 
-	return cheats_external_set_enabled(idx, !cheats[idx].enabled);
+	bool was_enabled = cheats[idx].enabled;
+	int old_entry = iSelectedEntry;
+	iSelectedEntry = idx;
+	cheats_toggle();
+	iSelectedEntry = old_entry;
+
+	return (cheats[idx].enabled != was_enabled) ? CHEATS_CMD_OK : CHEATS_CMD_LOAD_FAILED;
+}
+
+int cheats_set_enabled_by_name(const char *name, bool enabled)
+{
+	if (!cheats_available()) return CHEATS_CMD_NO_CHEATS;
+
+	int idx = cheats_find_by_name(name);
+	if (idx < 0) return CHEATS_CMD_NOT_FOUND;
+	if (cheats[idx].enabled == enabled) return CHEATS_CMD_OK;
+
+	return cheats_toggle_by_name(name);
 }
 
 int cheats_clear_enabled()
