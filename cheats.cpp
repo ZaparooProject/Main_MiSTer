@@ -459,61 +459,26 @@ void cheats_toggle()
 	}
 }
 
-static int cheats_find_by_name(const char *name)
+const char *cheats_get_name(int idx)
 {
-	if (!name || !*name) return -1;
-
-	for (int i = 0; i < cheats_available(); i++)
-	{
-		if (!strcmp(cheats[i].name, name)) return i;
-	}
-
-	return -1;
+	if (idx < 0 || idx >= cheats_available()) return NULL;
+	return cheats[idx].name;
 }
 
-int cheats_toggle_by_name(const char *name)
+bool cheats_get_enabled(int idx)
 {
-	if (!cheats_available()) return CHEATS_CMD_NO_CHEATS;
-
-	int idx = cheats_find_by_name(name);
-	if (idx < 0) return CHEATS_CMD_NOT_FOUND;
-
-	bool was_enabled = cheats[idx].enabled;
-	int old_entry = iSelectedEntry;
-	iSelectedEntry = idx;
-	cheats_toggle();
-	iSelectedEntry = old_entry;
-
-	return (cheats[idx].enabled != was_enabled) ? CHEATS_CMD_OK : CHEATS_CMD_LOAD_FAILED;
+	if (idx < 0 || idx >= cheats_available()) return false;
+	return cheats[idx].enabled;
 }
 
-int cheats_set_enabled_by_name(const char *name, bool enabled)
+int cheats_get_selected()
 {
-	if (!cheats_available()) return CHEATS_CMD_NO_CHEATS;
-
-	int idx = cheats_find_by_name(name);
-	if (idx < 0) return CHEATS_CMD_NOT_FOUND;
-	if (cheats[idx].enabled == enabled) return CHEATS_CMD_OK;
-
-	return cheats_toggle_by_name(name);
+	return iSelectedEntry;
 }
 
-int cheats_clear_enabled()
+void cheats_set_selected(int idx)
 {
-	if (!cheats_available()) return CHEATS_CMD_NO_CHEATS;
-
-	bool changedCheats = false;
-	for (int i = 0; i < cheats_available(); i++)
-	{
-		if (cheats[i].enabled)
-		{
-			cheats[i].enabled = false;
-			changedCheats = true;
-		}
-	}
-
-	if (changedCheats) cheats_send();
-	return CHEATS_CMD_OK;
+	if (idx >= 0 && idx < cheats_available()) iSelectedEntry = idx;
 }
 
 int cheats_loaded()

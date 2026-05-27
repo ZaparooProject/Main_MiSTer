@@ -9,18 +9,10 @@ void cheats_print();
 void cheats_toggle();
 int cheats_loaded();
 
-enum
-{
-	CHEATS_CMD_OK = 0,
-	CHEATS_CMD_NO_CHEATS = -1,
-	CHEATS_CMD_NOT_FOUND = -2,
-	CHEATS_CMD_LOAD_FAILED = -3,
-	CHEATS_CMD_NO_ROOM = -4
-};
-
-int cheats_set_enabled_by_name(const char *name, bool enabled);
-int cheats_toggle_by_name(const char *name);
-int cheats_clear_enabled();
+const char *cheats_get_name(int idx);
+bool cheats_get_enabled(int idx);
+int cheats_get_selected();
+void cheats_set_selected(int idx);
 
 void cheats_init_arcade(int unit_size, int max_active);
 void cheats_add_arcade(const char *name, const char *cheatData, int cheatSize);
