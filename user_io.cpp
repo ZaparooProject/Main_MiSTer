@@ -41,6 +41,7 @@
 #include "scaler.h"
 #include "support.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/auto_save.h"
 #include "support/zaparoo/menu_rbf.h"
 
 static char core_path[1024] = {};
@@ -2232,6 +2233,8 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 
 	// notify core of possible sd image change
 	spi_uio_cmd8(UIO_SET_SDSTAT, (1 << index) | (writable ? 0 : 0x80));
+	if (pre && len) auto_save_on_save_mounted(index, name);
+	else if (!len) auto_save_on_save_unmounted(index);
 	return ret ? 1 : 0;
 }
 
@@ -3262,6 +3265,7 @@ void user_io_poll()
 				blks = 1;
 			}
 			DisableIO();
+			if (op == 2) auto_save_on_sector_write(disk);
 			if ( sd_type[disk] == SD_TYPE_A2)
 			{
 				//if (op) printf("A2 %x %llu on %d\n", op,lba, disk);

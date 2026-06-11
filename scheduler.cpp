@@ -10,6 +10,7 @@
 #include "profiling.h"
 #include "video.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/auto_save.h"
 
 static cothread_t co_scheduler = nullptr;
 static cothread_t co_poll = nullptr;
@@ -36,6 +37,7 @@ static void scheduler_co_poll(void)
 			frame_timer();
 			input_poll(0);
 			alt_launcher_poll();
+			auto_save_poll();
 			video_poll();
 		}
 
