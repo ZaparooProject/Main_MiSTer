@@ -72,6 +72,7 @@ static unsigned long s_native_fb_mode_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
 static bool s_native_crt = false;
+static uint8_t s_native_crt_mode = 0;
 static bool s_resume_after_script = false;
 static bool s_script_resume_crt = false;
 static const int s_vt = 2;
@@ -84,13 +85,33 @@ static const char s_crt_state_file[] = "zaparoo_launcher_crt.bin";
 // zaparoo_launcher_crt.bin itself (launcher-owned CRT toggle).
 #define ALT_LAUNCHER_EXIT_RELOAD 42
 
+// zaparoo_launcher_crt.bin layout (written by the frontend, and by the
+// OSD toggle below):
+//   byte 0: CRT enabled (0/1)
+//   byte 1: video standard as the DDR word1 mode id - 0 NTSC 352x240,
+//           1 480i 720x480, 2 PAL 352x288. Absent in legacy 1-byte
+//           files; FileLoad partial-reads into the zeroed buffer, so
+//           legacy reads as NTSC.
+// The mode byte lives here (not only in the frontend's toml) because
+// this side programs the framebuffer geometry before the spawn and
+// re-asserts it ~1 s after - both writes must match the standard the
+// frontend will render, or the re-assert stomps a PAL framebuffer back
+// to 352x240 under a running Qt.
+static void load_persisted_native_crt_state(bool *enabled, uint8_t *mode)
+{
+	uint8_t v[2] = {0, 0};
+	FileLoadConfig(s_crt_state_file, v, sizeof(v));
+	if (v[1] > 2) v[1] = 0;
+	*enabled = v[0] != 0;
+	*mode = v[1];
+}
+
 static bool load_persisted_native_crt(void)
 {
-	// Read-only on this side: the frontend writes the file (its in-app CRT
-	// toggle), then exits with ALT_LAUNCHER_EXIT_RELOAD to get respawned.
-	uint8_t v = 0;
-	FileLoadConfig(s_crt_state_file, &v, sizeof(v));
-	return v != 0;
+	bool enabled;
+	uint8_t mode;
+	load_persisted_native_crt_state(&enabled, &mode);
+	return enabled;
 }
 
 static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int stride, bool log = true)
@@ -110,7 +131,18 @@ static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int str
 
 static void set_native_crt_fb_mode(bool log = true)
 {
-	set_launcher_fb_mode(8888, 1, 352, 240, 1408, log);
+	switch (s_native_crt_mode)
+	{
+	case 1: // 480i60, rendered progressive by the frontend
+		set_launcher_fb_mode(8888, 1, 720, 480, 2880, log);
+		break;
+	case 2: // PAL 50p
+		set_launcher_fb_mode(8888, 1, 352, 288, 1408, log);
+		break;
+	default: // NTSC 60p
+		set_launcher_fb_mode(8888, 1, 352, 240, 1408, log);
+		break;
+	}
 }
 
 static void blank_native_crt_fb(void)
@@ -226,10 +258,20 @@ static void disable_native_crt_path(void)
 
 static void enable_native_crt_path(void)
 {
+	// Refresh the standard from the state file on every CRT spawn: the
+	// frontend rewrites the mode byte (video standard change) before
+	// exiting with ALT_LAUNCHER_EXIT_RELOAD, and the T+1s re-assert in
+	// alt_launcher_poll must use the same geometry.
+	{
+		bool enabled;
+		load_persisted_native_crt_state(&enabled, &s_native_crt_mode);
+		(void)enabled;
+	}
+
 	set_vga_fb(0);
 	video_fb_enable(0);
 
-	// Double-write with a settle window so the kernel module's 352x240 layout
+	// Double-write with a settle window so the kernel module's mode layout
 	// is live before the frontend's fb-geometry validation runs. Without
 	// this, the frontend renders for up to a second under stale dims (the
 	// post-fork retry timer used to be what eventually fixed the picture).
@@ -587,6 +629,46 @@ void alt_launcher_shutdown(void)
 	{
 		video_fb_enable(0);
 	}
+}
+
+bool alt_launcher_native_crt_persisted(void)
+{
+	return load_persisted_native_crt();
+}
+
+void alt_launcher_toggle_native_crt(void)
+{
+	// The OSD's System Settings toggle. Same contract as the frontend's
+	// in-app toggle: flip byte 0 of the state file (byte 1 - the video
+	// standard - is preserved), then respawn the launcher under the new
+	// setting via the same re-entry steps as the ALT_LAUNCHER_EXIT_RELOAD
+	// path in alt_launcher_poll.
+	uint8_t v[2] = {0, 0};
+	FileLoadConfig(s_crt_state_file, v, sizeof(v));
+	if (v[1] > 2) v[1] = 0;
+	v[0] = v[0] ? 0 : 1;
+	if (!FileSaveConfig(s_crt_state_file, v, sizeof(v)))
+	{
+		printf("alt_launcher: OSD CRT toggle: could not write %s\n", s_crt_state_file);
+		return;
+	}
+	printf("alt_launcher: OSD CRT toggle -> enabled=%d mode=%d\n", v[0], v[1]);
+
+	if (s_pid)
+	{
+		pid_t pid = s_pid;
+		wait_launcher_stopped(pid);
+	}
+	user_io_osd_key_enable(1);
+	release_launcher_video();
+	reset_launcher_tty();
+	s_respawn_timer = 0;
+	s_crash_count = 0;
+	// Re-arm after an earlier give-up or escape: an explicit OSD toggle
+	// is the user asking for the frontend back.
+	s_gave_up = false;
+	s_escaped = false;
+	alt_launcher_init(v[0] != 0);
 }
 
 bool zaparoo_is_native_core(void)
