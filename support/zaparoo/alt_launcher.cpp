@@ -417,6 +417,11 @@ bool alt_launcher_active(void)
 	return s_pid != 0;
 }
 
+bool alt_launcher_scheduler_sleep_enabled(void)
+{
+	return s_pid || s_init_pending || s_respawn_timer;
+}
+
 bool alt_launcher_native_crt(void)
 {
 	return s_native_crt && s_pid != 0;

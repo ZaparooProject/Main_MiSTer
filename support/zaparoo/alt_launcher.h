@@ -13,6 +13,7 @@ void alt_launcher_resume_after_script(void);
 bool alt_launcher_native_crt(void);
 bool alt_launcher_active(void);
 bool alt_launcher_configured(void);
+bool alt_launcher_scheduler_sleep_enabled(void);
 
 // Display centering: signed offsets clamped to -8..+7. Setters update the
 // in-memory cache, persist to the config dir, and push to the FPGA via
