@@ -19,3 +19,12 @@ bool is_menu_rbf(const char *name)
 	if (base[0] && !strcasecmp(name, base)) return true;
 	return false;
 }
+
+bool is_zaparoo_menu_bootcore(const char *name)
+{
+	if (!name || !name[0]) return false;
+	if (!strcasecmp(name, s_menu_rbf_path)) return true;
+	const char *base = strrchr(s_menu_rbf_path, '/');
+	base = base ? base + 1 : s_menu_rbf_path;
+	return base[0] && !strcasecmp(name, base);
+}
