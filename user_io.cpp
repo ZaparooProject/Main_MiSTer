@@ -1546,7 +1546,10 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
-				if (alt_launcher_configured()) zaparoo_alt_launcher_init_for_menu();
+				if (alt_launcher_configured())
+				{
+					if (rbf_path[0] || !zaparoo_is_native_core()) zaparoo_alt_launcher_init_for_menu();
+				}
 				else
 				if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
 				else user_io_status_set("[3:1]", 0);
