@@ -179,6 +179,7 @@ static void restore_saved_fb_mode(void)
 	fprintf(fp, "%s\n", s_saved_fb_mode);
 	fclose(fp);
 	printf("alt_launcher: restored fb mode '%s'\n", s_saved_fb_mode);
+	s_saved_fb_mode_valid = false;
 }
 
 static void set_native_crt_fb_mode(bool log = true)
