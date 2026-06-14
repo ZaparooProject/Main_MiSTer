@@ -29,3 +29,4 @@ uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button);
 bool zaparoo_is_native_core(void);
 void zaparoo_alt_launcher_init_for_core(void);
 void zaparoo_alt_launcher_init_for_menu(void);
+void zaparoo_alt_launcher_start_for_menu(void);

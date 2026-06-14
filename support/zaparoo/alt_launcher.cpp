@@ -538,6 +538,18 @@ void alt_launcher_init(bool native_crt)
 	s_init_pending = true;
 }
 
+static void alt_launcher_start(bool native_crt)
+{
+	if (!alt_launcher_configured() || s_pid || s_gave_up)
+		return;
+	s_crash_count = 0;
+	s_respawn_timer = 0;
+	s_tty_deadline = 0;
+	s_native_crt = native_crt;
+	s_init_pending = false;
+	spawn();
+}
+
 void alt_launcher_prepare_for_script(void)
 {
 	reset_launcher_tty();
@@ -725,7 +737,7 @@ void zaparoo_alt_launcher_init_for_core(void)
 	}
 }
 
-void zaparoo_alt_launcher_init_for_menu(void)
+static void zaparoo_alt_launcher_prepare_menu_state(bool start)
 {
 	bool crt = load_persisted_native_crt();
 	load_persisted_offsets();
@@ -734,5 +746,16 @@ void zaparoo_alt_launcher_init_for_menu(void)
 	// Push the persisted offsets to the FPGA now that the menu RBF is loaded.
 	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));
 	user_io_status_set("[17:14]", (uint32_t)((uint8_t)s_v_offset & 0xF));
-	alt_launcher_init(crt);
+	if (start) alt_launcher_start(crt);
+	else alt_launcher_init(crt);
+}
+
+void zaparoo_alt_launcher_init_for_menu(void)
+{
+	zaparoo_alt_launcher_prepare_menu_state(false);
+}
+
+void zaparoo_alt_launcher_start_for_menu(void)
+{
+	zaparoo_alt_launcher_prepare_menu_state(true);
 }
