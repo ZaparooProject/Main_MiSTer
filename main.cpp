@@ -34,11 +34,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "scheduler.h"
 #include "osd.h"
 #include "offload.h"
+#include "hardware.h"
 
 const char *version = "$VER:" VDATE;
 
 int main(int argc, char *argv[])
 {
+	printf("ZAPAROO_T2 main_start_ms=%lu\n", GetTimer(0));
+
 	// Always pin main worker process to core #1 as core #0 is the
 	// hardware interrupt handler in Linux.  This reduces idle latency
 	// in the main loop by about 6-7x.

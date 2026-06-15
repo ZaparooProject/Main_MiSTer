@@ -1,5 +1,6 @@
 #include "scheduler.h"
 #include <stdio.h>
+#include <unistd.h>
 #include "libco.h"
 #include "menu.h"
 #include "user_io.h"
@@ -86,6 +87,8 @@ void scheduler_run(void)
 	for (;;)
 	{
 		scheduler_schedule();
+		if (alt_launcher_scheduler_sleep_enabled())
+			usleep(100);
 	}
 
 	co_delete(co_ui);

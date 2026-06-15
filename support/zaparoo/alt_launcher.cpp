@@ -68,8 +68,9 @@ uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button)
 static pid_t s_pid = 0;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
+static unsigned long s_tty_deadline = 0;
 static unsigned long s_native_status_timer = 0;
-static unsigned long s_native_fb_mode_timer = 0;
+static unsigned long s_native_crt_finish_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
 static bool s_native_crt = false;
@@ -81,6 +82,8 @@ static const char s_tty_path[] = "/dev/tty2";
 static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
 static const char s_crt_state_file[] = "zaparoo_launcher_crt.bin";
 static const char s_offsets_file[] = "zaparoo_video_offsets.bin";
+static char s_saved_fb_mode[64];
+static bool s_saved_fb_mode_valid = false;
 
 static int8_t s_h_offset = 0;
 static int8_t s_v_offset = 0;
@@ -132,6 +135,51 @@ static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int str
 	fclose(fp);
 	if (log)
 		printf("alt_launcher: fb mode set to %dx%d fmt=%d stride=%d\n", width, height, fmt, stride);
+}
+
+static void save_current_fb_mode(void)
+{
+	if (s_saved_fb_mode_valid)
+		return;
+
+	FILE *fp = fopen(s_fb_mode_path, "rt");
+	if (!fp)
+	{
+		printf("alt_launcher: unable to read fb mode: %s\n", strerror(errno));
+		return;
+	}
+
+	if (fgets(s_saved_fb_mode, sizeof(s_saved_fb_mode), fp))
+	{
+		size_t len = strlen(s_saved_fb_mode);
+		while (len && (s_saved_fb_mode[len - 1] == '\n' || s_saved_fb_mode[len - 1] == '\r'))
+			s_saved_fb_mode[--len] = 0;
+		s_saved_fb_mode_valid = len != 0;
+		if (s_saved_fb_mode_valid)
+			printf("alt_launcher: saved fb mode '%s'\n", s_saved_fb_mode);
+	}
+	fclose(fp);
+}
+
+static void restore_saved_fb_mode(void)
+{
+	if (!s_saved_fb_mode_valid)
+	{
+		set_launcher_fb_mode(8888, 1, 960, 720, 3840);
+		return;
+	}
+
+	FILE *fp = fopen(s_fb_mode_path, "wt");
+	if (!fp)
+	{
+		printf("alt_launcher: unable to restore fb mode: %s\n", strerror(errno));
+		return;
+	}
+
+	fprintf(fp, "%s\n", s_saved_fb_mode);
+	fclose(fp);
+	printf("alt_launcher: restored fb mode '%s'\n", s_saved_fb_mode);
+	s_saved_fb_mode_valid = false;
 }
 
 static void set_native_crt_fb_mode(bool log = true)
@@ -227,41 +275,34 @@ static void disable_native_crt_path(void)
 	user_io_status_set("[9]", 0);
 	video_fb_enable(0);
 	set_vga_fb(0);
-	set_launcher_fb_mode(8888, 1, 960, 720, 3840);
+	restore_saved_fb_mode();
+	s_tty_deadline = 0;
 	s_native_status_timer = 0;
-	s_native_fb_mode_timer = 0;
+	s_native_crt_finish_timer = 0;
 }
 
-static void enable_native_crt_path(void)
+static void prepare_native_crt_path(void)
 {
 	set_vga_fb(0);
 	video_fb_enable(0);
-
-	// Double-write with a settle window so the kernel module's 320x240 layout
-	// is live before status[9] flips. Without this, the frontend renders for
-	// up to a second under stale dims (the post-fork retry timer used to be
-	// what eventually fixed the picture).
+	save_current_fb_mode();
 	set_native_crt_fb_mode(false);
-	usleep(100000);
-	set_native_crt_fb_mode();
+	s_native_crt_finish_timer = GetTimer(1);
+	if (!s_native_crt_finish_timer) s_native_crt_finish_timer = 1;
+}
+
+static void finish_native_crt_path(void)
+{
+	// The frontend repeats the 320x240 linuxfb `vmode` while it starts. This
+	// side does not rewrite the mode again; it only blanks the native DDR
+	// scan-out buffer before status[9] routes the FPGA to it.
+	s_native_crt_finish_timer = 0;
 
 	blank_native_crt_fb();
 
 	user_io_status_set("[9]", 1);
 	s_native_status_timer = GetTimer(500);
 	if (!s_native_status_timer) s_native_status_timer = 1;
-	s_native_fb_mode_timer = GetTimer(1000);
-	if (!s_native_fb_mode_timer) s_native_fb_mode_timer = 1;
-}
-
-static void wait_launcher_tty_ready(pid_t pid)
-{
-	for (int i = 0; i < 100; i++)
-	{
-		if (launcher_tty_ready(pid))
-			return;
-		usleep(10000);
-	}
 }
 
 static void return_to_normal_mode(void)
@@ -282,6 +323,9 @@ static void reset_launcher_state(void)
 {
 	s_pid = 0;
 	s_respawn_timer = 0;
+	s_tty_deadline = 0;
+	s_native_status_timer = 0;
+	s_native_crt_finish_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = false;
 	s_init_pending = false;
@@ -337,25 +381,62 @@ static void release_launcher_video(void)
 	}
 }
 
+static void exec_launcher_child(const char *path)
+{
+	setenv("LC_ALL", "en_US.UTF-8", 1);
+	setenv("HOME", "/root", 1);
+
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	CPU_SET(0, &set);
+	sched_setaffinity(0, sizeof(set), &set);
+
+	setsid();
+
+	int tty_fd = open(s_tty_path, O_RDWR);
+	if (tty_fd >= 0)
+	{
+		ioctl(tty_fd, TIOCSCTTY, 0);
+		dup2(tty_fd, STDIN_FILENO);
+		dup2(tty_fd, STDOUT_FILENO);
+		dup2(tty_fd, STDERR_FILENO);
+		if (tty_fd > STDERR_FILENO)
+			close(tty_fd);
+	}
+
+	static const char clear[] = "\033[0m\033[?25l\033[37m\033[40m\033[2J\033[H";
+	if (write(STDOUT_FILENO, clear, sizeof(clear) - 1) < 0) {}
+
+	if (s_native_crt)
+		execl(path, path, "--crt", NULL);
+	else
+		execl(path, path, NULL);
+	_exit(1);
+}
+
+static void finalize_spawn(void)
+{
+	s_tty_deadline = 0;
+	video_chvt(s_vt);
+	if (!s_native_crt)
+		video_fb_enable(1);
+	else
+	{
+		input_switch(0);
+		user_io_status_set("[9]", 1);
+	}
+
+	// The frontend grabs input as soon as it starts. If the OSD is still
+	// up (e.g. user toggled CRT mode or hit Reboot from System Settings),
+	// it would trap input with no way to dismiss it — drop it now.
+	if (menu_present()) MenuHide();
+}
+
 static void spawn(void)
 {
 	char path[2100];
 	strncpy(path, getFullPath(s_launcher_path), sizeof(path) - 1);
 	path[sizeof(path) - 1] = '\0';
-
-	static const char cmd[] =
-		"#!/bin/bash\n"
-		"export LC_ALL=en_US.UTF-8\n"
-		"export HOME=/root\n"
-		"printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
-		"if [ \"$ALT_LAUNCHER_CRT\" = \"1\" ]; then\n"
-		"	exec \"$ALT_LAUNCHER_PATH\" --crt\n"
-		"fi\n"
-		"exec \"$ALT_LAUNCHER_PATH\"\n";
-
-	unlink("/tmp/alt_launcher");
-	if (!FileSave("/tmp/alt_launcher", (void*)cmd, strlen(cmd)))
-		return;
 
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
@@ -363,8 +444,8 @@ static void spawn(void)
 	printf("alt_launcher: native_crt=%d\n", s_native_crt);
 	if (s_native_crt)
 	{
-		enable_native_crt_path();
-		printf("alt_launcher: native CRT path enabled\n");
+		prepare_native_crt_path();
+		printf("alt_launcher: native CRT path prepared\n");
 	}
 	else
 	{
@@ -384,37 +465,21 @@ static void spawn(void)
 	printf("alt_launcher: spawned pid=%d path=%s\n", s_pid, path);
 	if (!s_pid)
 	{
-		setenv("ALT_LAUNCHER_PATH", path, 1);
-		setenv("ALT_LAUNCHER_CRT", s_native_crt ? "1" : "0", 1);
-		cpu_set_t set;
-		CPU_ZERO(&set);
-		CPU_SET(0, &set);
-		sched_setaffinity(0, sizeof(set), &set);
-		setsid();
-		execl("/sbin/agetty", "/sbin/agetty", "-a", "root", "-l",
-		      "/tmp/alt_launcher", "-i", "--nohostname", "-L", s_tty, "linux", NULL);
-		_exit(1);
+		exec_launcher_child(path);
 	}
 
-	wait_launcher_tty_ready(s_pid);
-	video_chvt(s_vt);
-	if (!s_native_crt)
-		video_fb_enable(1);
-	else
-	{
-		input_switch(0);
-		user_io_status_set("[9]", 1);
-	}
-
-	// The frontend grabs input as soon as it starts. If the OSD is still
-	// up (e.g. user toggled CRT mode or hit Reboot from System Settings),
-	// it would trap input with no way to dismiss it — drop it now.
-	if (menu_present()) MenuHide();
+	s_tty_deadline = GetTimer(1000);
+	if (!s_tty_deadline) s_tty_deadline = 1;
 }
 
 bool alt_launcher_active(void)
 {
 	return s_pid != 0;
+}
+
+bool alt_launcher_scheduler_sleep_enabled(void)
+{
+	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer;
 }
 
 bool alt_launcher_native_crt(void)
@@ -469,8 +534,21 @@ void alt_launcher_init(bool native_crt)
 		return;
 	s_crash_count = 0;
 	s_respawn_timer = 0;
+	s_tty_deadline = 0;
 	s_native_crt = native_crt;
 	s_init_pending = true;
+}
+
+static void alt_launcher_start(bool native_crt)
+{
+	if (!alt_launcher_configured() || s_pid || s_gave_up)
+		return;
+	s_crash_count = 0;
+	s_respawn_timer = 0;
+	s_tty_deadline = 0;
+	s_native_crt = native_crt;
+	s_init_pending = false;
+	spawn();
 }
 
 void alt_launcher_prepare_for_script(void)
@@ -486,6 +564,7 @@ void alt_launcher_prepare_for_script(void)
 	wait_launcher_stopped(pid);
 	user_io_osd_key_enable(1);
 	s_respawn_timer = 0;
+	s_tty_deadline = 0;
 	s_crash_count = 0;
 	s_init_pending = false;
 	s_gave_up = false;
@@ -514,6 +593,12 @@ void alt_launcher_poll(void)
 {
 	if (s_pid)
 	{
+		if (s_native_crt && s_native_crt_finish_timer && CheckTimer(s_native_crt_finish_timer))
+		{
+			finish_native_crt_path();
+			printf("alt_launcher: native CRT path enabled\n");
+		}
+
 		if (s_native_crt && s_native_status_timer && CheckTimer(s_native_status_timer))
 		{
 			user_io_status_set("[9]", 1);
@@ -521,16 +606,11 @@ void alt_launcher_poll(void)
 			if (!s_native_status_timer) s_native_status_timer = 1;
 		}
 
-		if (s_native_crt && s_native_fb_mode_timer && CheckTimer(s_native_fb_mode_timer))
-		{
-			set_native_crt_fb_mode();
-			s_native_fb_mode_timer = 0;
-		}
-
 		int status;
 		if (waitpid(s_pid, &status, WNOHANG) == s_pid)
 		{
 			s_pid = 0;
+			s_tty_deadline = 0;
 			user_io_osd_key_enable(1);
 			bool exited = WIFEXITED(status);
 			int exit_status = exited ? WEXITSTATUS(status) : 0;
@@ -565,7 +645,11 @@ void alt_launcher_poll(void)
 				s_crash_count = 0;
 			s_respawn_timer = GetTimer(1000);
 			if (!s_respawn_timer) s_respawn_timer = 1;
+			return;
 		}
+
+		if (s_tty_deadline && !s_native_crt_finish_timer && (launcher_tty_ready(s_pid) || CheckTimer(s_tty_deadline)))
+			finalize_spawn();
 		return;
 	}
 
@@ -654,7 +738,7 @@ void zaparoo_alt_launcher_init_for_core(void)
 	}
 }
 
-void zaparoo_alt_launcher_init_for_menu(void)
+static void zaparoo_alt_launcher_prepare_menu_state(bool start)
 {
 	bool crt = load_persisted_native_crt();
 	load_persisted_offsets();
@@ -663,5 +747,16 @@ void zaparoo_alt_launcher_init_for_menu(void)
 	// Push the persisted offsets to the FPGA now that the menu RBF is loaded.
 	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));
 	user_io_status_set("[17:14]", (uint32_t)((uint8_t)s_v_offset & 0xF));
-	alt_launcher_init(crt);
+	if (start) alt_launcher_start(crt);
+	else alt_launcher_init(crt);
+}
+
+void zaparoo_alt_launcher_init_for_menu(void)
+{
+	zaparoo_alt_launcher_prepare_menu_state(false);
+}
+
+void zaparoo_alt_launcher_start_for_menu(void)
+{
+	zaparoo_alt_launcher_prepare_menu_state(true);
 }
