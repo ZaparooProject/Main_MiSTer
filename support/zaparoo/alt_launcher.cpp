@@ -65,6 +65,28 @@ uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button)
 	return 0;
 }
 
+// Standard keyboards report letters + ESC; gamepads/mice report BTN_* instead.
+static bool fd_is_keyboard(int fd)
+{
+	if (fd < 0) return false;
+	unsigned char kb[(KEY_MAX + 7) / 8] = {};
+	if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(kb)), kb) < 0) return false;
+	#define BIT_SET(b) (kb[(b) / 8] & (1 << ((b) % 8)))
+	return BIT_SET(KEY_ESC) && BIT_SET(KEY_A) && BIT_SET(KEY_Z);
+	#undef BIT_SET
+}
+
+int alt_launcher_kbd_grab(int fd)
+{
+	return (alt_launcher_active() && fd_is_keyboard(fd)) ? 1 : 0;
+}
+
+bool alt_launcher_kbd_to_frontend(uint16_t code)
+{
+	return alt_launcher_active() && !user_io_osd_is_visible()
+		&& code < 256 && code != KEY_MENU && code != KEY_F12;
+}
+
 static pid_t s_pid = 0;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
