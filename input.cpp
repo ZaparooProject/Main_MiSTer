@@ -3897,6 +3897,14 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 				}
 
 				if (ev->code == KEY_HOMEPAGE) ev->code = KEY_MENU;
+
+				// Bridge keys to the launcher's uinput instead of the core (see alt_launcher.h).
+				if (alt_launcher_kbd_to_frontend(ev->code))
+				{
+					if (ev->value <= 1) uinp_send_key(ev->code, ev->value);
+					return;
+				}
+
 				if (send_key) user_io_kbd(ev->code, ev->value);
 				return;
 			}
@@ -5528,7 +5536,7 @@ int input_test(int getchar)
 						//Works only through cable or USB dongle.
 						if (input[n].vid == 0x045e && input[n].pid == 0x0b00) input[n].quirk = QUIRK_SHIFT;
 
-						ioctl(pool[n].fd, EVIOCGRAB, (grabbed | user_io_osd_is_visible()) ? 1 : 0);
+						ioctl(pool[n].fd, EVIOCGRAB, (grabbed | user_io_osd_is_visible() | alt_launcher_kbd_grab(pool[n].fd)) ? 1 : 0);
 
 						n++;
 						if (n >= NUMDEV) break;
@@ -6463,7 +6471,7 @@ void input_switch(int grab)
 
 	for (int i = 0; i < NUMDEV; i++)
 	{
-		if (pool[i].fd >= 0) ioctl(pool[i].fd, EVIOCGRAB, (grabbed | user_io_osd_is_visible()) ? 1 : 0);
+		if (pool[i].fd >= 0) ioctl(pool[i].fd, EVIOCGRAB, (grabbed | user_io_osd_is_visible() | alt_launcher_kbd_grab(pool[i].fd)) ? 1 : 0);
 	}
 }
 
