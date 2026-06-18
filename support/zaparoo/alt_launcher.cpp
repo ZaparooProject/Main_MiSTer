@@ -1,4 +1,5 @@
 #include "alt_launcher.h"
+#include "launcher_input_metadata.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
@@ -489,6 +490,8 @@ static void spawn(void)
 	{
 		exec_launcher_child(path);
 	}
+
+	input_export_launcher_metadata();
 
 	s_tty_deadline = GetTimer(1000);
 	if (!s_tty_deadline) s_tty_deadline = 1;
