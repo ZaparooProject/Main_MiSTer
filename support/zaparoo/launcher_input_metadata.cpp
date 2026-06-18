@@ -3,9 +3,11 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <linux/input.h>
 
@@ -13,7 +15,7 @@
 #include "../../input.h"
 
 #define LIM_PATH      "/tmp/zaparoo_launcher_input.json"
-#define LIM_PATH_TMP  "/tmp/zaparoo_launcher_input.json.tmp"
+#define LIM_PATH_TMP  "/tmp/zaparoo_launcher_input.json.tmp.XXXXXX"
 
 struct slot_position
 {
@@ -227,8 +229,18 @@ void launcher_input_metadata_write(const launcher_input_snapshot *snap, int play
 	gettimeofday(&tv, NULL);
 	uint64_t updated_ms = (uint64_t)tv.tv_sec * 1000 + (tv.tv_usec / 1000);
 
-	FILE *fp = fopen(LIM_PATH_TMP, "wt");
-	if (!fp) return;
+	char tmp_path[] = LIM_PATH_TMP;
+	int fd = mkstemp(tmp_path);
+	if (fd < 0) return;
+	fchmod(fd, 0644);
+
+	FILE *fp = fdopen(fd, "wt");
+	if (!fp)
+	{
+		close(fd);
+		unlink(tmp_path);
+		return;
+	}
 
 	fputs("{\n", fp);
 	fprintf(fp, "  \"version\": 1,\n");
@@ -259,9 +271,10 @@ void launcher_input_metadata_write(const launcher_input_snapshot *snap, int play
 	fputs("  }\n", fp);
 	fputs("}\n", fp);
 
-	fflush(fp);
-	fsync(fileno(fp));
-	fclose(fp);
-
-	rename(LIM_PATH_TMP, LIM_PATH);
+	if (fflush(fp) != 0 || fsync(fileno(fp)) != 0 || fclose(fp) != 0 ||
+		rename(tmp_path, LIM_PATH) != 0)
+	{
+		unlink(tmp_path);
+		return;
+	}
 }
