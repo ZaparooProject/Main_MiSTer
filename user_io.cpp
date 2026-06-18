@@ -1469,7 +1469,8 @@ void user_io_init(const char *path, const char *xml)
 
 	// Zaparoo: u-boot/stock binary may have loaded the system menu.rbf before we got here.
 	// Force a reload of our hardcoded menu RBF if we booted without an explicit RBF path.
-	if (is_menu() && !rbf_path[0]) fpga_load_rbf(menu_rbf_name());
+	if (is_menu() && !rbf_path[0] && !zaparoo_is_native_core()) fpga_load_rbf(menu_rbf_name());
+	else if (is_menu() && !rbf_path[0] && zaparoo_is_native_core()) zaparoo_alt_launcher_start_for_menu();
 
 	uint8_t hotswap[4] = {};
 	ide_reset(hotswap);
@@ -1545,7 +1546,10 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
-				if (alt_launcher_configured()) zaparoo_alt_launcher_init_for_menu();
+				if (alt_launcher_configured())
+				{
+					if (rbf_path[0] || !zaparoo_is_native_core()) zaparoo_alt_launcher_init_for_menu();
+				}
 				else
 				if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
 				else user_io_status_set("[3:1]", 0);
@@ -2160,6 +2164,23 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 					{
 						printf("FOUND A2 DSK/DO type\n");
 						sd_type[index] = SD_TYPE_A2;
+					}
+				}
+
+				// Apple IIgs: classify/validate/convert the image for its slot.
+				if (ret && iigs_is_core())
+				{
+					int iigs_w = writable;
+					int r = iigs_mount(index, name, &sd_image[index], &iigs_w);
+					if (r == IIGS_REJECT)
+					{
+						FileClose(&sd_image[index]);
+						ret = 0;
+					}
+					else if (r == IIGS_HANDLED)
+					{
+						sd_type[index] = SD_TYPE_IIGS;
+						writable = iigs_w;
 					}
 				}
 
@@ -3269,6 +3290,12 @@ void user_io_poll()
 				else if (op & 1) a2_readDSK(&sd_image[disk], lba, ack);
 				else break;
 			}
+			else if ( sd_type[disk] == SD_TYPE_IIGS)
+			{
+				if (op == 2) iigs_write(disk, &sd_image[disk], lba, ack);
+				else if (op & 1) iigs_read(disk, &sd_image[disk], lba, ack);
+				else break;
+			}
 			else if ((blks == G64_BLOCK_COUNT_1541+1 || blks == G64_BLOCK_COUNT_1571+1) && sd_type[disk]==SD_TYPE_C64)
 			{
 				if (op == 2) c64_writeGCR(disk, lba, blks-1);
@@ -3361,7 +3388,7 @@ void user_io_poll()
 						done = 1;
 						buffer_lba[disk] = lba;
 					}
-					else if (blksz == (2352 + 24) && is_cdi())
+					else if (blksz == CDI_CDIC_BUFFER_SIZE && is_cdi())
 					{
 						diskled_on();
 						cdi_read_cd(buffer[disk], lba, buf_n);
@@ -3449,7 +3476,7 @@ void user_io_poll()
 						psx_read_cd(buffer[disk], lba, buf_n);
 						buffer_lba[disk] = lba;
 					}
-					else if (blksz == (2352 + 24) && is_cdi())
+					else if (blksz == CDI_CDIC_BUFFER_SIZE && is_cdi())
 					{
 						cdi_read_cd(buffer[disk], lba, buf_n);
 						buffer_lba[disk] = lba;
