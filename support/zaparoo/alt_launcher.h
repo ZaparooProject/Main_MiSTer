@@ -12,7 +12,9 @@ void alt_launcher_resume_after_script(void);
 bool alt_launcher_native_crt(void);
 bool alt_launcher_active(void);
 bool alt_launcher_configured(void);
+// Returns the persisted native CRT enable state used by launcher restarts.
 bool alt_launcher_native_crt_persisted(void);
+// Flips the persisted native CRT state and respawns the launcher to apply it.
 void alt_launcher_toggle_native_crt(void);
 bool alt_launcher_scheduler_sleep_enabled(void);
 
