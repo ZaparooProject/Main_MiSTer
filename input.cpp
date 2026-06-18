@@ -37,6 +37,7 @@
 #include "scaler.h"
 #include "file_io.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/launcher_input_metadata.h"
 
 #define NUMDEV 30
 #define UINPUT_NAME "MiSTer virtual input"
@@ -2946,6 +2947,11 @@ static void assign_player(int dev, int num, int force = 0)
 	printf("Device %s %sassigned to player %d\n", input[dev].id, force ? "forcebly " : "", input[dev].num);
 }
 
+// Zaparoo launcher input-device classification + metadata export. Kept in a
+// separate support/zaparoo/ file but #included here because it needs this TU's
+// file-static device tables (input[]/pool[]/devInput/NUMDEV).
+#include "support/zaparoo/launcher_input_detect.inc"
+
 static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int dev, bool menu_event)
 {
 	if (ev->type != EV_KEY && ev->type != EV_ABS && ev->type != EV_REL) return;
@@ -3624,6 +3630,13 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 				{
 					if (ev->value <= 1)
 					{
+						if (alt_launcher_active() && ev->value == 1 && !zaparoo_is_virtual_dev(dev))
+						{
+							launcher_input_snapshot snap;
+							zaparoo_fill_launcher_snapshot(&snap, dev);
+							launcher_input_metadata_write(&snap, input[dev].num, "controller");
+						}
+
 						if ((input[dev].mmap[SYS_BTN_MENU_FUNC] & 0xFFFF) ?
 							(ev->code == (input[dev].mmap[SYS_BTN_MENU_FUNC] & 0xFFFF)) :
 							(ev->code == input[dev].mmap[SYS_BTN_A]))
@@ -3902,6 +3915,7 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 				if (alt_launcher_kbd_to_frontend(ev->code))
 				{
 					if (ev->value <= 1) uinp_send_key(ev->code, ev->value);
+					if (ev->value == 1) zaparoo_export_metadata("keyboard");
 					return;
 				}
 
