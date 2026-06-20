@@ -62,10 +62,9 @@ This fork auto-syncs upstream daily and publishes **two channels from two branch
    build layers the fork diff `upstream/master..<branch>` onto an upstream base, so that diff
    must stay **fork-only** — keep both branches upstream-synced.
 3. **Promote to the distribution only when explicitly asked:**
-   `git checkout stable && git merge master && git push origin stable`. If the promoted feature
-   adds *new* hooks to `input.cpp` or `scheduler.cpp`, also update
-   `.github/apply_stable_hooks.py` on `stable` (stable's hooks in those two files come from that
-   script, not the diff).
+   `git checkout stable && git merge master && git push origin stable`. The stable build applies
+   the full fork diff with `git apply -3`, so `input.cpp` / `scheduler.cpp` hooks promote like any
+   other fork-touched file — no extra step.
 
 Full details: `support/zaparoo/RELEASE.md`.
 

@@ -21,8 +21,8 @@ release channels, so upstream syncing and fork-feature promotion are decoupled.
 - **Unstable** (`.github/build_unstable_release.sh` → `unstable-build.sh`): upstream `master`
   HEAD base + `git diff upstream/master..master`.
 - **Stable** (`.github/build_release.sh` → `stable-build.sh`): upstream's latest tagged
-  release (`releases/MiSTer_*`) base + `git diff upstream/master..stable`, with the
-  `input.cpp` / `scheduler.cpp` hooks re-applied by `.github/apply_stable_hooks.py`.
+  release (`releases/MiSTer_*`) base + `git diff upstream/master..stable`, applied with
+  `git apply -3` (3-way, tolerates upstream drift) — `MiSTer.ini` is the only exclusion.
 
 Each channel is built from a checkout of its **own branch**, so its content, build scripts,
 and hook list all come from that branch.
@@ -41,16 +41,10 @@ When a beta feature on `master` is ready to ship to everyone:
 ```sh
 git checkout stable
 git merge master            # or cherry-pick specific commits for a partial promotion
-# If the promoted feature adds NEW hooks to input.cpp or scheduler.cpp, also update
-# .github/apply_stable_hooks.py on stable to include them (see caveat below).
 git push origin stable      # triggers a fresh MiSTer_Zaparoo_YYYYMMDD stable release
 ```
 
-### Caveat: input.cpp / scheduler.cpp hooks
-
-The stable build excludes `input.cpp` and `scheduler.cpp` from the fork diff and instead
-re-applies a **hardcoded** set of hooks via `.github/apply_stable_hooks.py`. So stable's
-hooks in those two files are governed by that script, not by merging the diff. Promoting a
-feature that adds new hooks to either file requires editing `apply_stable_hooks.py` on the
-`stable` branch as well. Features that only touch new `support/zaparoo/*` files (or other
-upstream files) are handled by the diff alone — no script change needed.
+The stable build applies the **full** fork diff with `git apply -3`, so hooks in `input.cpp`
+/ `scheduler.cpp` promote exactly like any other fork-touched file — there is no separate
+hook list to maintain. If upstream ever drifts those files enough that the 3-way apply
+conflicts, the stable build fails loudly (rather than silently shipping a stale hook set).
