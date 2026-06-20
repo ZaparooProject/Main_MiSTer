@@ -23,10 +23,8 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
 	char s[256];
 	int m = 0;
 
-	// Right arrow indicates a sibling page (Zaparoo Frontend) accessible
-	// via the right-arrow key — see MENU_ZAPAROO_LAUNCHER1 in menu.cpp.
-	OsdSetTitle("System Settings", OSD_ARROW_LEFT | OSD_ARROW_RIGHT);
-	*menumask = 0x1F;
+	OsdSetTitle("System Settings", OSD_ARROW_LEFT);
+	*menumask = 0x3F;
 
 	OsdWrite(m++);
 	sprintf(s, "       MiSTer v%s", version + 5);
@@ -62,15 +60,20 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
 	OsdWrite(m++, " Remap keyboard            \x16", menusub == 0);
 	OsdWrite(m++, " Define joystick buttons   \x16", menusub == 1);
 	OsdWrite(m++, " Scripts                   \x16", menusub == 2);
+	// Same persisted bit the frontend's Settings toggle writes
+	// (zaparoo_launcher_crt.bin byte 0); selecting it respawns the
+	// frontend under the new mode immediately.
+	sprintf(s, " CRT mode:               %s", alt_launcher_native_crt_persisted() ? " On" : "Off");
+	OsdWrite(m++, s, menusub == 3);
 
 	OsdWrite(m++, "");
 	int cr = m;
-	OsdWrite(m++, " Reboot (hold \x16 cold reboot)", menusub == 3);
+	OsdWrite(m++, " Reboot (hold \x16 cold reboot)", menusub == 4);
 	*sysinfo_timer = 0;
 	*reboot_req = 0;
 
 	while (m < OsdGetSize() - 1) OsdWrite(m++, "");
-	OsdWrite(15, ALT_STD_EXIT, menusub == 4);
+	OsdWrite(15, ALT_STD_EXIT, menusub == 5);
 
 	return cr;
 }
@@ -79,16 +82,24 @@ int alt_launcher_translate_system_select(int menusub)
 {
 	if (!alt_launcher_configured()) return menusub;
 
+	// 3 is the CRT mode toggle, which has no upstream dispatch case:
+	// perform the toggle here and return -1 so MENU_SYSTEM2 redraws the
+	// menu (the respawn then drops the OSD via spawn()'s MenuHide).
+	if (menusub == 3)
+	{
+		alt_launcher_toggle_native_crt();
+		return -1;
+	}
+
 	// Maps trimmed-menu menusub to upstream MENU_SYSTEM2 dispatch index:
-	// 0 Remap -> 1, 1 Define joy -> 2, 2 Scripts -> 3, 3 Reboot -> 5,
-	// 4 Exit -> 6. CRT mode lives on the Zaparoo Frontend's Video
-	// sub-page now, not here.
-	static const int map[] = { 1, 2, 3, 5, 6 };
+	// 0 Remap -> 1, 1 Define joy -> 2, 2 Scripts -> 3, 4 Reboot -> 5,
+	// 5 Exit -> 6 (3, CRT mode, is handled above).
+	static const int map[] = { 1, 2, 3, -1, 5, 6 };
 	if (menusub < 0 || menusub >= (int)(sizeof(map) / sizeof(map[0]))) return -1;
 	return map[menusub];
 }
 
 bool alt_launcher_system_holding_reboot(int menusub)
 {
-	return alt_launcher_configured() && menusub == 3;
+	return alt_launcher_configured() && menusub == 4;
 }

@@ -91,12 +91,13 @@ bool alt_launcher_kbd_to_frontend(uint16_t code)
 static pid_t s_pid = 0;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
+static unsigned long s_native_fb_mode_timer = 0;
 static unsigned long s_tty_deadline = 0;
-static unsigned long s_native_status_timer = 0;
 static unsigned long s_native_crt_finish_timer = 0;
 static bool s_gave_up = false;
 static bool s_init_pending = false;
 static bool s_native_crt = false;
+static uint8_t s_native_crt_mode = 0;
 static bool s_resume_after_script = false;
 static bool s_script_resume_crt = false;
 static const int s_vt = 2;
@@ -104,45 +105,40 @@ static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
 static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
 static const char s_crt_state_file[] = "zaparoo_launcher_crt.bin";
-static const char s_offsets_file[] = "zaparoo_video_offsets.bin";
 static char s_saved_fb_mode[64];
 static bool s_saved_fb_mode_valid = false;
 
-static int8_t s_h_offset = 0;
-static int8_t s_v_offset = 0;
+// Frontend exit code requesting a respawn after it rewrote
+// zaparoo_launcher_crt.bin itself (launcher-owned CRT toggle).
+#define ALT_LAUNCHER_EXIT_RELOAD 42
 
-static int8_t clamp_offset(int8_t v)
+// zaparoo_launcher_crt.bin layout (written by the frontend, and by the
+// OSD toggle below):
+//   byte 0: CRT enabled (0/1)
+//   byte 1: video standard as the DDR word1 mode id - 0 NTSC 352x240,
+//           1 480i 720x480, 2 PAL 352x288. Absent in legacy 1-byte
+//           files; FileLoad partial-reads into the zeroed buffer, so
+//           legacy reads as NTSC.
+// The mode byte lives here (not only in the frontend's toml) because
+// this side programs the framebuffer geometry before the spawn and
+// re-asserts it ~1 s after - both writes must match the standard the
+// frontend will render, or the re-assert stomps a PAL framebuffer back
+// to 352x240 under a running Qt.
+static void load_persisted_native_crt_state(bool *enabled, uint8_t *mode)
 {
-	if (v < -8) return -8;
-	if (v > 7) return 7;
-	return v;
+	uint8_t v[2] = {0, 0};
+	FileLoadConfig(s_crt_state_file, v, sizeof(v));
+	if (v[1] > 2) v[1] = 0;
+	*enabled = v[0] != 0;
+	*mode = v[1];
 }
 
 static bool load_persisted_native_crt(void)
 {
-	uint8_t v = 0;
-	FileLoadConfig(s_crt_state_file, &v, sizeof(v));
-	return v != 0;
-}
-
-static void save_persisted_native_crt(bool crt)
-{
-	uint8_t v = crt ? 1 : 0;
-	FileSaveConfig(s_crt_state_file, &v, sizeof(v));
-}
-
-static void load_persisted_offsets(void)
-{
-	int8_t buf[2] = { 0, 0 };
-	FileLoadConfig(s_offsets_file, buf, sizeof(buf));
-	s_h_offset = clamp_offset(buf[0]);
-	s_v_offset = clamp_offset(buf[1]);
-}
-
-static void save_persisted_offsets(void)
-{
-	int8_t buf[2] = { s_h_offset, s_v_offset };
-	FileSaveConfig(s_offsets_file, buf, sizeof(buf));
+	bool enabled;
+	uint8_t mode;
+	load_persisted_native_crt_state(&enabled, &mode);
+	return enabled;
 }
 
 static void set_launcher_fb_mode(int fmt, int rb, int width, int height, int stride, bool log = true)
@@ -207,19 +203,31 @@ static void restore_saved_fb_mode(void)
 
 static void set_native_crt_fb_mode(bool log = true)
 {
-	set_launcher_fb_mode(8888, 1, 320, 240, 1280, log);
+	switch (s_native_crt_mode)
+	{
+	case 1: // 480i60, rendered progressive by the frontend
+		set_launcher_fb_mode(8888, 1, 720, 480, 2880, log);
+		break;
+	case 2: // PAL 50p
+		set_launcher_fb_mode(8888, 1, 352, 288, 1408, log);
+		break;
+	default: // NTSC 60p
+		set_launcher_fb_mode(8888, 1, 352, 240, 1408, log);
+		break;
+	}
 }
 
 static void blank_native_crt_fb(void)
 {
 	// CRT path doesn't read /dev/fb0 (kernel FB at 0x22000000). The frontend
-	// runs a worker that copies the top-left 320x240 from /dev/fb0 into a
-	// separate FPGA-mapped region at 0x3A000000 (control word + two 320x240
-	// RGBA buffers). The FPGA scans out from that region. Nothing zeros it
-	// across frontend restarts or software reboots, so the previous session's
-	// last frame ghosts in until the frontend's writer thread starts.
+	// runs a worker that copies the top-left 352x240 from /dev/fb0 into a
+	// separate FPGA-mapped region at 0x3A000000 (two control words + two
+	// framebuffers, 3 MB under the v2 contract). The core scans out from
+	// that region. A zeroed word0 means "writer stopped", so this blank
+	// deterministically parks the core on its noise pattern — and clears any
+	// previous session's frame — until the frontend's writer publishes.
 	const uint32_t native_addr = 0x3A000000u;
-	const uint32_t native_size = 0x000A0000u;
+	const uint32_t native_size = 0x00300000u;
 	void *p = shmem_map(native_addr, native_size);
 	if (!p)
 	{
@@ -229,6 +237,24 @@ static void blank_native_crt_fb(void)
 	memset(p, 0, native_size);
 	shmem_unmap(p, native_size);
 	printf("alt_launcher: blanked %u bytes of CRT native video DDR at 0x%x\n", native_size, native_addr);
+}
+
+static void zero_native_crt_words(void)
+{
+	// Only a zeroed word0 releases the core from the last published frame
+	// (there is no core-side disable bit), so teardown must clear the
+	// control words even when the frontend crashed before its own stop
+	// handler could.
+	const uint32_t native_addr = 0x3A000000u;
+	const uint32_t map_size = 0x1000u;
+	void *p = shmem_map(native_addr, map_size);
+	if (!p)
+	{
+		printf("alt_launcher: zero words shmem_map(0x%x, %u) failed\n", native_addr, map_size);
+		return;
+	}
+	memset(p, 0, 8);
+	shmem_unmap(p, map_size);
 }
 
 static void clear_launcher_tty(void)
@@ -295,17 +321,27 @@ static bool launcher_tty_ready(pid_t pid)
 
 static void disable_native_crt_path(void)
 {
-	user_io_status_set("[9]", 0);
+	zero_native_crt_words();
 	video_fb_enable(0);
 	set_vga_fb(0);
 	restore_saved_fb_mode();
 	s_tty_deadline = 0;
-	s_native_status_timer = 0;
+	s_native_fb_mode_timer = 0;
 	s_native_crt_finish_timer = 0;
 }
 
 static void prepare_native_crt_path(void)
 {
+	// Refresh the standard from the state file on every CRT spawn: the
+	// frontend rewrites the mode byte (video standard change) before
+	// exiting with ALT_LAUNCHER_EXIT_RELOAD, and the T+1s re-assert in
+	// alt_launcher_poll must use the same geometry.
+	{
+		bool enabled;
+		load_persisted_native_crt_state(&enabled, &s_native_crt_mode);
+		(void)enabled;
+	}
+
 	set_vga_fb(0);
 	video_fb_enable(0);
 	save_current_fb_mode();
@@ -316,16 +352,15 @@ static void prepare_native_crt_path(void)
 
 static void finish_native_crt_path(void)
 {
-	// The frontend repeats the 320x240 linuxfb `vmode` while it starts. This
-	// side does not rewrite the mode again; it only blanks the native DDR
-	// scan-out buffer before status[9] routes the FPGA to it.
+	// v2 contract: no status[9]. Blank the DDR scan-out region, then re-assert
+	// the fb geometry at T+1s so the frontend's vmode can't leave a non-NTSC
+	// standard stomped back to 352x240.
 	s_native_crt_finish_timer = 0;
 
 	blank_native_crt_fb();
 
-	user_io_status_set("[9]", 1);
-	s_native_status_timer = GetTimer(500);
-	if (!s_native_status_timer) s_native_status_timer = 1;
+	s_native_fb_mode_timer = GetTimer(1000);
+	if (!s_native_fb_mode_timer) s_native_fb_mode_timer = 1;
 }
 
 static void return_to_normal_mode(void)
@@ -347,7 +382,7 @@ static void reset_launcher_state(void)
 	s_pid = 0;
 	s_respawn_timer = 0;
 	s_tty_deadline = 0;
-	s_native_status_timer = 0;
+	s_native_fb_mode_timer = 0;
 	s_native_crt_finish_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = false;
@@ -444,10 +479,7 @@ static void finalize_spawn(void)
 	if (!s_native_crt)
 		video_fb_enable(1);
 	else
-	{
 		input_switch(0);
-		user_io_status_set("[9]", 1);
-	}
 
 	// The frontend grabs input as soon as it starts. If the OSD is still
 	// up (e.g. user toggled CRT mode or hit Reboot from System Settings),
@@ -504,53 +536,12 @@ bool alt_launcher_active(void)
 
 bool alt_launcher_scheduler_sleep_enabled(void)
 {
-	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer;
+	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer || s_native_fb_mode_timer;
 }
 
 bool alt_launcher_native_crt(void)
 {
 	return s_native_crt && s_pid != 0;
-}
-
-int8_t alt_launcher_h_offset(void)
-{
-	return s_h_offset;
-}
-
-int8_t alt_launcher_v_offset(void)
-{
-	return s_v_offset;
-}
-
-void alt_launcher_set_h_offset(int8_t v)
-{
-	s_h_offset = clamp_offset(v);
-	save_persisted_offsets();
-	// 4-bit two's-complement bit pattern; FPGA reinterprets as signed -8..+7.
-	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));
-}
-
-void alt_launcher_set_v_offset(int8_t v)
-{
-	s_v_offset = clamp_offset(v);
-	save_persisted_offsets();
-	user_io_status_set("[17:14]", (uint32_t)((uint8_t)s_v_offset & 0xF));
-}
-
-void alt_launcher_toggle_crt(void)
-{
-	bool current_crt = alt_launcher_native_crt();
-	bool target_crt  = !current_crt;
-
-	save_persisted_native_crt(target_crt);
-
-	printf("alt_launcher: toggle CRT path %d -> %d\n", current_crt, target_crt);
-
-	// Shutdown drops status[9], releases the FB mode and restores HPS framebuffer
-	// state regardless of whether the frontend was running. After it returns we
-	// always have a clean slate to spawn the next frontend invocation.
-	alt_launcher_shutdown();
-	alt_launcher_init(target_crt);
 }
 
 void alt_launcher_init(bool native_crt)
@@ -624,11 +615,10 @@ void alt_launcher_poll(void)
 			printf("alt_launcher: native CRT path enabled\n");
 		}
 
-		if (s_native_crt && s_native_status_timer && CheckTimer(s_native_status_timer))
+		if (s_native_crt && s_native_fb_mode_timer && CheckTimer(s_native_fb_mode_timer))
 		{
-			user_io_status_set("[9]", 1);
-			s_native_status_timer = GetTimer(500);
-			if (!s_native_status_timer) s_native_status_timer = 1;
+			set_native_crt_fb_mode();
+			s_native_fb_mode_timer = 0;
 		}
 
 		int status;
@@ -642,6 +632,20 @@ void alt_launcher_poll(void)
 			int sig = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
 			bool escaped = (exited && exit_status == 0) || sig == SIGTERM || sig == SIGINT;
 			bool crashed = !escaped && (sig != 0 || (exited && exit_status != 0));
+			// The frontend rewrote zaparoo_launcher_crt.bin itself and wants
+			// to be respawned under the new setting — release the current
+			// video path and re-enter through the normal init machinery.
+			if (exited && exit_status == ALT_LAUNCHER_EXIT_RELOAD)
+			{
+				bool crt = load_persisted_native_crt();
+				printf("alt_launcher: reload requested, respawning (crt=%d)\n", crt);
+				release_launcher_video();
+				reset_launcher_tty();
+				s_respawn_timer = 0;
+				s_crash_count = 0;
+				alt_launcher_init(crt);
+				return;
+			}
 			// Any exit while in CRT mode drops back to HDMI / no frontend
 			// for the rest of this session — respawning into CRT after the
 			// user already left it is a UX trap. The persisted CRT
@@ -746,6 +750,46 @@ void alt_launcher_shutdown(void)
 	}
 }
 
+bool alt_launcher_native_crt_persisted(void)
+{
+	return load_persisted_native_crt();
+}
+
+void alt_launcher_toggle_native_crt(void)
+{
+	// The OSD's System Settings toggle. Same contract as the frontend's
+	// in-app toggle: flip byte 0 of the state file (byte 1 - the video
+	// standard - is preserved), then respawn the launcher under the new
+	// setting via the same re-entry steps as the ALT_LAUNCHER_EXIT_RELOAD
+	// path in alt_launcher_poll.
+	uint8_t v[2] = {0, 0};
+	FileLoadConfig(s_crt_state_file, v, sizeof(v));
+	if (v[1] > 2) v[1] = 0;
+	v[0] = v[0] ? 0 : 1;
+	if (!FileSaveConfig(s_crt_state_file, v, sizeof(v)))
+	{
+		printf("alt_launcher: OSD CRT toggle: could not write %s\n", s_crt_state_file);
+		return;
+	}
+	printf("alt_launcher: OSD CRT toggle -> enabled=%d mode=%d\n", v[0], v[1]);
+
+	if (s_pid)
+	{
+		pid_t pid = s_pid;
+		wait_launcher_stopped(pid);
+	}
+	user_io_osd_key_enable(1);
+	release_launcher_video();
+	reset_launcher_tty();
+	s_respawn_timer = 0;
+	s_crash_count = 0;
+	// Re-arm after an earlier give-up or escape: an explicit OSD toggle
+	// is the user asking for the frontend back.
+	s_gave_up = false;
+	s_escaped = false;
+	alt_launcher_init(v[0] != 0);
+}
+
 bool zaparoo_is_native_core(void)
 {
 	static const char *name = "Zaparoo Launcher";
@@ -766,12 +810,7 @@ void zaparoo_alt_launcher_init_for_core(void)
 static void zaparoo_alt_launcher_prepare_menu_state(bool start)
 {
 	bool crt = load_persisted_native_crt();
-	load_persisted_offsets();
-	printf("alt_launcher: initializing menu frontend (persisted crt=%d, h=%d, v=%d)\n",
-	       crt, s_h_offset, s_v_offset);
-	// Push the persisted offsets to the FPGA now that the menu RBF is loaded.
-	user_io_status_set("[13:10]", (uint32_t)((uint8_t)s_h_offset & 0xF));
-	user_io_status_set("[17:14]", (uint32_t)((uint8_t)s_v_offset & 0xF));
+	printf("alt_launcher: initializing menu frontend (persisted crt=%d)\n", crt);
 	if (start) alt_launcher_start(crt);
 	else alt_launcher_init(crt);
 }
