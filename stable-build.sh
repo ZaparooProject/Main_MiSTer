@@ -80,23 +80,16 @@ git worktree add --detach "${TMP_WORKTREE}" "${STABLE_COMMIT}" >/dev/null
 
 # Apply the cumulative fork-only diff (relative to upstream master) so revert
 # pairs and other intra-fork conflicts cancel out — replaying commit-by-commit
-# would re-expose them. -3 falls back to a 3-way merge when stable's content
-# for a shared file has drifted from upstream master. MiSTer.ini is excluded:
-# the fork's only change is an uncomment of a default-valued line, and stable's
-# example ini drifts often enough to cause spurious conflicts.
+# would re-expose them. -3 falls back to a 3-way merge when stable's content for
+# a shared file (including input.cpp / scheduler.cpp) has drifted from upstream
+# master — the same mechanism used for every fork-touched upstream file, so the
+# fork diff stays the single source of truth. MiSTer.ini is excluded: the fork's
+# only change is an uncomment of a default-valued line, and stable's example ini
+# drifts often enough to cause spurious conflicts.
 FORK_DIFF=$(git diff --binary "${UPSTREAM_REF}..${FORK_HEAD}" -- . \
-    ':(exclude)MiSTer.ini' \
-    ':(exclude)input.cpp' \
-    ':(exclude)scheduler.cpp')
+    ':(exclude)MiSTer.ini')
 if [ -n "${FORK_DIFF}" ]; then
     printf '%s\n' "${FORK_DIFF}" | git -C "${TMP_WORKTREE}" apply -3 --index
-fi
-
-# These hook files drift across stable/master often. Apply the small Zaparoo
-# hook additions by function scope instead of using upstream-master patch context.
-if [ -n "$(git diff --name-only "${UPSTREAM_REF}..${FORK_HEAD}" -- input.cpp scheduler.cpp)" ]; then
-    .github/apply_stable_hooks.py "${TMP_WORKTREE}"
-    git -C "${TMP_WORKTREE}" add input.cpp scheduler.cpp
 fi
 
 "${TMP_WORKTREE}/docker-build.sh" "$@"
