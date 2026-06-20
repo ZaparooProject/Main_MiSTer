@@ -33,18 +33,31 @@ jobs:
           path: gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf
           key: gcc-arm-10.2-2020.11
 
-      - name: Push merge commit
-        if: steps.sync.outputs.changed == 'true'
+      - name: Push master merge commit
+        if: steps.sync.outputs.master_changed == 'true'
         run: git push origin master
 
-      - name: Build stable release
-        run: bash .github/build_release.sh
+      - name: Push stable merge commit
+        if: steps.sync.outputs.stable_changed == 'true'
+        run: git push origin stable
+
+      # Unstable channel: upstream master HEAD + fork @ master (includes beta).
+      - name: Build unstable release
+        run: |
+          git checkout master
+          bash .github/build_unstable_release.sh
         env:
           GH_TOKEN: ${{ github.token }}
           SKIP_EXISTING_RELEASE: true
 
-      - name: Build unstable release
-        run: bash .github/build_unstable_release.sh
+      # Stable channel: upstream tagged release + fork @ stable (promoted only).
+      - name: Build stable release
+        run: |
+          if ! git checkout stable 2>/dev/null; then
+            echo "No stable branch yet; skipping stable build."
+            exit 0
+          fi
+          bash .github/build_release.sh
         env:
           GH_TOKEN: ${{ github.token }}
           SKIP_EXISTING_RELEASE: true

@@ -14,6 +14,10 @@ non-blocking spawn) are intentionally omitted.
 > the table below or revise the inconsistencies section. Stale entries are
 > worse than no entries — please prune as you cleanup.
 
+> **Release process:** see [`support/zaparoo/RELEASE.md`](support/zaparoo/RELEASE.md)
+> for the `master` (beta → unstable) vs `stable` (promoted → distribution) channel
+> split and how to promote a feature to a public release.
+
 ---
 
 ## 1. Change map

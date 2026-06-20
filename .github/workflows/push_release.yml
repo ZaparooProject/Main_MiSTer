@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [master]
+    branches: [master, stable]
   workflow_dispatch:
 
 permissions:
@@ -28,12 +28,16 @@ jobs:
           path: gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf
           key: gcc-arm-10.2-2020.11
 
-      - name: Build and release (stable)
-        run: bash .github/build_release.sh
+      # Push to master = integration/beta -> rebuild the unstable prerelease only.
+      - name: Build and release (unstable)
+        if: github.ref_name == 'master'
+        run: bash .github/build_unstable_release.sh
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Build and release (unstable)
-        run: bash .github/build_unstable_release.sh
+      # Push to stable = promotion -> re-cut the distribution stable release only.
+      - name: Build and release (stable)
+        if: github.ref_name == 'stable'
+        run: bash .github/build_release.sh
         env:
           GH_TOKEN: ${{ github.token }}

@@ -40,7 +40,36 @@ make clean        # remove bin/
 
 **Deploy to device**: `./build.sh` — builds, kills the running `MiSTer` process over SSH, FTPs the binary to `/media/fat/MiSTer`, and relaunches it. Put the device's IP in a `host` file beside the script (default `192.168.1.75`, root/`1`).
 
-There is no automated test suite, linter, or CI.
+There is no automated test suite or linter. CI (GitHub Actions) builds and publishes
+releases — see **Release channels** below.
+
+---
+
+## !! Release channels — beta vs distribution !!
+
+This fork auto-syncs upstream daily and publishes **two channels from two branches**:
+
+- **`master`** = integration/beta branch → **unstable prerelease** (`MiSTer_Zaparoo_unstable`).
+  New fork work (PRs) lands here and reaches **opt-in testers only**.
+- **`stable`** = promoted branch → **distribution release** (`MiSTer_Zaparoo_YYYYMMDD`).
+  This is what every MiSTer user gets.
+
+**Rules for agents:**
+
+1. **Land all new fork work on `master`.** NEVER commit beta/unreleased features directly to
+   `stable` — that ships them to everyone.
+2. **Both branches keep merging `upstream/master`** (`.github/sync_upstream.sh`). Each channel's
+   build layers the fork diff `upstream/master..<branch>` onto an upstream base, so that diff
+   must stay **fork-only** — keep both branches upstream-synced.
+3. **Promote to the distribution only when explicitly asked:**
+   `git checkout stable && git merge master && git push origin stable`. If the promoted feature
+   adds *new* hooks to `input.cpp` or `scheduler.cpp`, also update
+   `.github/apply_stable_hooks.py` on `stable` (stable's hooks in those two files come from that
+   script, not the diff).
+
+Full details: `support/zaparoo/RELEASE.md`.
+
+---
 
 ## Architecture
 
