@@ -146,6 +146,7 @@ static const ini_var_t ini_vars[] =
 	{ "XBE2_SHIFT", (void*)(&(cfg.xbe2_shift)), UINT16, 0, 0x22F },
 	{ "SPD_QUIRK", (void*)(&(cfg.spd_quirk)), UINT8, 0, 3 },
 	{ "HDMI_OFF", (void*)(&(cfg.hdmi_off)), UINT16, 0, 1440 },
+	{ "AUTO_SAVE", (void*)(&(cfg.auto_save)), UINT32, 0, 86400 },
 };
 
 static const int nvars = (int)(sizeof(ini_vars) / sizeof(ini_var_t));

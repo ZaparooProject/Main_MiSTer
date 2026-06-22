@@ -28,7 +28,18 @@ This repository is a **fork of [MiSTer-devel/Main_MiSTer](https://github.com/MiS
 
 The binary cross-compiles for ARM (Cyclone V SoC on the DE10-Nano). There is no native x86 build — do not use the system `gcc`.
 
-**Toolchain** (first time only): `source setup_default_toolchain.sh` — must be sourced, not executed. Downloads gcc-arm 10.2-2020.11 and exports `PATH`/`CC`.
+**Preferred build (this fork)**: `./docker-build.sh` — runs `make` inside the devcontainer toolchain image, no host-side toolchain needed. Forwards args to `make`:
+
+```
+./docker-build.sh                 # build bin/MiSTer_Zaparoo
+./docker-build.sh clean
+./docker-build.sh DEBUG=1 V=1
+MISTER_DOCKER_REBUILD=1 ./docker-build.sh   # force-rebuild the image
+```
+
+The script invokes `make PRJ=MiSTer_Zaparoo` so the output binary is named for the fork. Always use this for builds — it's the only path that's reproducible across machines.
+
+**Bare-metal toolchain** (only if Docker isn't available): `source setup_default_toolchain.sh` — must be sourced, not executed. Downloads gcc-arm 10.2-2020.11 and exports `PATH`/`CC`. Then `make` directly.
 
 ```
 make              # build bin/MiSTer (stripped) and bin/MiSTer.elf
