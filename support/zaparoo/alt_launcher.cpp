@@ -21,6 +21,7 @@
 #include "hardware.h"
 #include "input.h"
 #include "menu.h"
+#include "scheduler.h"
 #include "shmem.h"
 #include "user_io.h"
 #include "video.h"
@@ -482,11 +483,15 @@ static void switch_to_launcher_vt(void)
 
 	if (ioctl(fd, VT_ACTIVATE, s_vt)) printf("alt_launcher: VT_ACTIVATE fails\n");
 
-	for (int i = 0; i < 50; i++)
+	// Yield to the scheduler rather than usleep() so the poll cothread stays
+	// cooperative while we wait (bounded) for the VT to become active.
+	unsigned long deadline = GetTimer(500);
+	for (;;)
 	{
 		struct vt_stat st;
 		if (!ioctl(fd, VT_GETSTATE, &st) && st.v_active == s_vt) break;
-		usleep(10000);
+		if (CheckTimer(deadline)) break;
+		scheduler_yield();
 	}
 
 	close(fd);
