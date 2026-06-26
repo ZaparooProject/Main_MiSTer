@@ -17,6 +17,7 @@
 #include <sys/wait.h>
 #include "cfg.h"
 #include "file_io.h"
+#include "fpga_io.h"
 #include "hardware.h"
 #include "input.h"
 #include "menu.h"
@@ -472,10 +473,33 @@ static void exec_launcher_child(const char *path)
 	_exit(1);
 }
 
+// Bounded replacement for video_chvt(): its VT_WAITACTIVE blocks forever if the
+// frontend stalls bringing up video, which would wedge the poll cothread.
+static void switch_to_launcher_vt(void)
+{
+	int fd = open("/dev/tty0", O_RDONLY | O_CLOEXEC);
+	if (fd < 0) return;
+
+	if (ioctl(fd, VT_ACTIVATE, s_vt)) printf("alt_launcher: VT_ACTIVATE fails\n");
+
+	for (int i = 0; i < 50; i++)
+	{
+		struct vt_stat st;
+		if (!ioctl(fd, VT_GETSTATE, &st) && st.v_active == s_vt) break;
+		usleep(10000);
+	}
+
+	close(fd);
+}
+
 static void finalize_spawn(void)
 {
+	// Defer the VT/fb takeover until the FPGA/HDMI has settled; s_tty_deadline
+	// stays armed so this retries on a later alt_launcher_poll pass.
+	if (!is_fpga_ready(1)) return;
+
 	s_tty_deadline = 0;
-	video_chvt(s_vt);
+	switch_to_launcher_vt();
 	if (!s_native_crt)
 		video_fb_enable(1);
 	else
