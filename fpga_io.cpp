@@ -427,6 +427,10 @@ static int make_env(const char *name, const char *cfg)
 
 int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 {
+	// Tear down the launcher frontend (and its HPS framebuffer mmaps) before any
+	// FPGA reconfiguration. A live frontend scanning out /dev/fb0 over the f2sdram
+	// bridge deadlocks the AXI bus when do_bridge(0) resets it during load.
+	alt_launcher_shutdown();
 	OsdDisable();
 	static char path[1024];
 	int ret = 0;
