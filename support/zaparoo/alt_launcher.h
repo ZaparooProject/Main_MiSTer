@@ -9,6 +9,7 @@ void alt_launcher_poll(void);
 void alt_launcher_shutdown(void);
 void alt_launcher_prepare_for_script(void);
 void alt_launcher_resume_after_script(void);
+bool alt_launcher_command(const char *cmd);
 bool alt_launcher_native_crt(void);
 bool alt_launcher_active(void);
 bool alt_launcher_configured(void);

@@ -102,13 +102,20 @@ static bool s_native_crt = false;
 static uint8_t s_native_crt_mode = 0;
 static bool s_resume_after_script = false;
 static bool s_script_resume_crt = false;
-static const int s_vt = 2;
-static const char s_tty[] = "tty2";
-static const char s_tty_path[] = "/dev/tty2";
+static bool s_console_lease = false;
+static bool s_console_state_published = false;
+static char s_console_lease_nonce[65] = {};
+static const int s_vt = 7;
+static const char s_tty[] = "tty7";
+static const char s_tty_path[] = "/dev/tty7";
+static const char s_console_state_path[] = "/tmp/zaparoo_console_state";
+static const char s_console_state_tmp_path[] = "/tmp/zaparoo_console_state.tmp";
 static const char s_fb_mode_path[] = "/sys/module/MiSTer_fb/parameters/mode";
 static const char s_crt_state_file[] = "zaparoo_launcher_crt.bin";
 static char s_saved_fb_mode[64];
 static bool s_saved_fb_mode_valid = false;
+
+static void publish_console_state(const char *state, const char *nonce);
 
 // Frontend exit code requesting a respawn after it rewrote
 // zaparoo_launcher_crt.bin itself (launcher-owned CRT toggle).
@@ -475,26 +482,32 @@ static void exec_launcher_child(const char *path)
 }
 
 // Bounded replacement for video_chvt(): its VT_WAITACTIVE blocks forever if the
-// frontend stalls bringing up video, which would wedge the poll cothread.
-static void switch_to_launcher_vt(void)
+// target process stalls bringing up video, which would wedge the poll cothread.
+static bool switch_to_vt(int vt)
 {
 	int fd = open("/dev/tty0", O_RDONLY | O_CLOEXEC);
-	if (fd < 0) return;
+	if (fd < 0) return false;
 
-	if (ioctl(fd, VT_ACTIVATE, s_vt)) printf("alt_launcher: VT_ACTIVATE fails\n");
+	if (ioctl(fd, VT_ACTIVATE, vt)) printf("alt_launcher: VT_ACTIVATE fails\n");
 
 	// Yield to the scheduler rather than usleep() so the poll cothread stays
 	// cooperative while we wait (bounded) for the VT to become active.
+	bool active = false;
 	unsigned long deadline = GetTimer(500);
 	for (;;)
 	{
 		struct vt_stat st;
-		if (!ioctl(fd, VT_GETSTATE, &st) && st.v_active == s_vt) break;
+		if (!ioctl(fd, VT_GETSTATE, &st) && st.v_active == vt)
+		{
+			active = true;
+			break;
+		}
 		if (CheckTimer(deadline)) break;
 		scheduler_yield();
 	}
 
 	close(fd);
+	return active;
 }
 
 static void finalize_spawn(void)
@@ -504,7 +517,7 @@ static void finalize_spawn(void)
 	if (!is_fpga_ready(1)) return;
 
 	s_tty_deadline = 0;
-	switch_to_launcher_vt();
+	switch_to_vt(s_vt);
 	if (!s_native_crt)
 		video_fb_enable(1);
 	else
@@ -518,6 +531,8 @@ static void finalize_spawn(void)
 
 static void spawn(void)
 {
+	if (!s_console_state_published) publish_console_state("ready", NULL);
+
 	char path[2100];
 	strncpy(path, getFullPath(s_launcher_path), sizeof(path) - 1);
 	path[sizeof(path) - 1] = '\0';
@@ -632,6 +647,100 @@ void alt_launcher_resume_after_script(void)
 	s_escaped = false;
 	printf("alt_launcher: resuming launcher after script (crt=%d)\n", crt);
 	alt_launcher_init(crt);
+}
+
+static void publish_console_state(const char *state, const char *nonce)
+{
+	FILE *fp = fopen(s_console_state_tmp_path, "wt");
+	if (!fp)
+	{
+		printf("alt_launcher: unable to publish console state: %s\n", strerror(errno));
+		return;
+	}
+
+	fprintf(fp, "1 %d %s %s\n", getpid(), state, nonce && *nonce ? nonce : "-");
+	if (fclose(fp))
+	{
+		unlink(s_console_state_tmp_path);
+		return;
+	}
+	if (rename(s_console_state_tmp_path, s_console_state_path))
+	{
+		printf("alt_launcher: unable to replace console state: %s\n", strerror(errno));
+		unlink(s_console_state_tmp_path);
+		return;
+	}
+	s_console_state_published = true;
+}
+
+static bool valid_console_nonce(const char *nonce)
+{
+	if (!nonce || !*nonce || strlen(nonce) >= sizeof(s_console_lease_nonce)) return false;
+	for (const char *p = nonce; *p; p++)
+	{
+		if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || *p == '-'))
+			return false;
+	}
+	return true;
+}
+
+bool alt_launcher_command(const char *cmd)
+{
+	if (!alt_launcher_configured() || strncmp(cmd, "zaparoo_console ", 16)) return false;
+
+	char action[16] = {};
+	char nonce[65] = {};
+	int vt = 0;
+	int fields = sscanf(cmd + 16, "%15s %64s %d", action, nonce, &vt);
+	if (fields < 2 || !valid_console_nonce(nonce))
+	{
+		printf("alt_launcher: invalid console command: %s\n", cmd);
+		return true;
+	}
+
+	if (!strcmp(action, "acquire") && fields == 3 && vt >= 1 && vt <= 63)
+	{
+		if (s_console_lease)
+		{
+			if (!strcmp(nonce, s_console_lease_nonce)) publish_console_state("acquired", nonce);
+			else publish_console_state("busy", nonce);
+			return true;
+		}
+
+		alt_launcher_prepare_for_script();
+		if (!switch_to_vt(vt))
+		{
+			publish_console_state("failed", nonce);
+			alt_launcher_resume_after_script();
+			return true;
+		}
+		video_fb_enable(1);
+		s_console_lease = true;
+		strncpy(s_console_lease_nonce, nonce, sizeof(s_console_lease_nonce) - 1);
+		publish_console_state("acquired", nonce);
+		printf("alt_launcher: console lease acquired nonce=%s vt=%d\n", nonce, vt);
+		return true;
+	}
+
+	if (!strcmp(action, "release") && fields == 2)
+	{
+		if (!s_console_lease || strcmp(nonce, s_console_lease_nonce))
+		{
+			publish_console_state("failed", nonce);
+			return true;
+		}
+
+		video_fb_enable(0);
+		s_console_lease = false;
+		s_console_lease_nonce[0] = 0;
+		alt_launcher_resume_after_script();
+		publish_console_state("released", nonce);
+		printf("alt_launcher: console lease released nonce=%s\n", nonce);
+		return true;
+	}
+
+	printf("alt_launcher: unsupported console command: %s\n", cmd);
+	return true;
 }
 
 void alt_launcher_poll(void)
