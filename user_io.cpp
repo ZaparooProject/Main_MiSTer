@@ -4252,7 +4252,7 @@ void user_io_kbd(uint16_t key, int press)
 			// either keyboard or joypad MENU button. Input grabbing flips
 			// automatically when the OSD opens (user_io_osd_key_enable ->
 			// input_switch -> EVIOCGRAB).
-			bool is_menu_event = ((has_menu() || osd_is_visible || (get_key_mod() & (LALT | RALT | RGUI | LGUI))) && (((key == KEY_F12) && (!is_f12_mod_needed() || (get_key_mod() & (RGUI | LGUI)))) || key == KEY_MENU));
+			bool is_menu_event = !alt_launcher_console_lease_active() && ((has_menu() || osd_is_visible || (get_key_mod() & (LALT | RALT | RGUI | LGUI))) && (((key == KEY_F12) && (!is_f12_mod_needed() || (get_key_mod() & (RGUI | LGUI)))) || key == KEY_MENU));
 			if (!press)
 			{
 				if (is_menu() && !video_fb_state()) printf("PS2 code(break)%s for core: %d(0x%X)\n", (code & EXT) ? "(ext)" : "", code & 255, code & 255);

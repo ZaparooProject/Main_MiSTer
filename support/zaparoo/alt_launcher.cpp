@@ -578,6 +578,11 @@ bool alt_launcher_active(void)
 	return s_pid != 0;
 }
 
+bool alt_launcher_console_lease_active(void)
+{
+	return s_console_lease;
+}
+
 bool alt_launcher_scheduler_sleep_enabled(void)
 {
 	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer || s_native_fb_mode_timer;
@@ -715,6 +720,7 @@ bool alt_launcher_command(const char *cmd)
 			return true;
 		}
 		video_fb_enable(1);
+		if (menu_present()) MenuHide();
 		s_console_lease = true;
 		strncpy(s_console_lease_nonce, nonce, sizeof(s_console_lease_nonce) - 1);
 		publish_console_state("acquired", nonce);
