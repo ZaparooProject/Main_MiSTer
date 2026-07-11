@@ -720,8 +720,9 @@ bool alt_launcher_command(const char *cmd)
 			return true;
 		}
 		video_fb_enable(1);
-		if (menu_present()) MenuHide();
 		s_console_lease = true;
+		if (menu_present()) MenuHide();
+		user_io_osd_key_enable(0);
 		strncpy(s_console_lease_nonce, nonce, sizeof(s_console_lease_nonce) - 1);
 		publish_console_state("acquired", nonce);
 		printf("alt_launcher: console lease acquired nonce=%s vt=%d\n", nonce, vt);
