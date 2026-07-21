@@ -112,6 +112,7 @@ typedef struct {
 	uint16_t xbe2_shift;
 	uint8_t spd_quirk;
 	uint16_t hdmi_off;
+	uint32_t auto_save;
 } cfg_t;
 
 extern cfg_t cfg;
