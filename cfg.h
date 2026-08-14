@@ -112,6 +112,8 @@ typedef struct {
 	uint16_t xbe2_shift;
 	uint8_t spd_quirk;
 	uint16_t hdmi_off;
+	uint32_t keyboard_as_joystick[256];
+	uint8_t sanity_check;
 } cfg_t;
 
 extern cfg_t cfg;
