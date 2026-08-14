@@ -1433,6 +1433,7 @@ void HandleUI(void)
 			break;
 		}
 	}
+
 	if (select_ini)
 	{
 		DISKLED_ON;
@@ -6330,7 +6331,7 @@ void HandleUI(void)
 		OsdWrite(m++, s, menusub == 5, 0);
 
 		OsdWrite(m++, "", 0, 0);
-		strcpy(s, " ROM    : ");
+		strcpy(s, " ROM      : ");
 		{
 			char *path = HomeDir();
 			int len = strlen(path);
@@ -6352,7 +6353,7 @@ void HandleUI(void)
 			}
 		}
 		OsdWrite(m++, s, menusub == 7, 0);
-		strcpy(s, " HRTmon : ");
+		strcpy(s, " HRTmon   : ");
 		strcat(s, (minimig_config.memory & 0x40) ? "Enabled" : "Disabled");
 		OsdWrite(m++, s, menusub == 8, 0);
 
@@ -6571,7 +6572,7 @@ void HandleUI(void)
 
 		while (1)
 		{
-		m = 0;
+			m = 0;
 			if (!menusub) firstmenu = 0;
 			adjvisible = 0;
 			menumask = 0x4010;
@@ -6637,48 +6638,48 @@ void HandleUI(void)
 			int ide_on = (minimig_config.ide_cfg & 1) ? 1 : 0;
 			if (ide_on)  menumask |= 0x1560;
 
-		strcpy(s, " IDE A600/A1200    : ");
+			strcpy(s, " IDE A600/A1200   : ");
 			strcat(s, ide_on ? "Enabled" : "Disabled");
 			MenuWrite(m++, s, menusub == 4, 0);
 
 			if (ide_on)
 			{
-		strcpy(s, " Fast-IDE (68020)  : ");
-		strcat(s, (minimig_config.ide_cfg & 0x20) ? "Off" : "On");
+				strcpy(s, " Fast-IDE (68020) : ");
+				strcat(s, (minimig_config.ide_cfg & 0x20) ? "Off" : "On ");
 				MenuWrite(m++, s, menusub == 5, !ide_on || !(minimig_config.cpu & 2));
 				if (!(minimig_config.cpu & 2)) menumask &= ~0x20;
 
 				uint n = 6, t = 0x80;
-			for (uint i = 0; i < 4; i++)
-			{
+				for (uint i = 0; i < 4; i++)
+				{
 					strcpy(s, (i & 2) ? " \x1bSec. " : " \x1bPri. ");
-				strcat(s, (i & 1) ? " Slave: " : "Master: ");
-				strcat(s, (minimig_config.hardfile[i].cfg == 2) ? "Removable/CD" : minimig_config.hardfile[i].cfg ? "Fixed/HDD" : "Disabled");
+					strcat(s, (i & 1) ? " Slave: " : "Master: ");
+					strcat(s, (minimig_config.hardfile[i].cfg == 2) ? "Removable/CD" : minimig_config.hardfile[i].cfg ? "Fixed/HDD" : "Disabled");
 					MenuWrite(m++, s, ide_on ? (menusub == n++) : 0, !ide_on);
-				if (minimig_config.hardfile[i].filename[0])
-				{
-					strcpy(s, "                                ");
-					char *path = HomeDir();
-					int len = strlen(path);
-					char *name = minimig_config.hardfile[i].filename;
-					if (!strncasecmp(name, path, len))  name += len + 1;
-					strncpy(&s[3], name, 25);
-				}
-				else
-				{
-					strcpy(s, "   ** not selected **");
-				}
+					if (minimig_config.hardfile[i].filename[0])
+					{
+						strcpy(s, "                                ");
+						char *path = HomeDir();
+						int len = strlen(path);
+						char *name = minimig_config.hardfile[i].filename;
+						if (!strncasecmp(name, path, len))  name += len + 1;
+						strncpy(&s[3], name, 25);
+					}
+					else
+					{
+						strcpy(s, "   ** not selected **");
+					}
 					enable = ide_on && minimig_config.hardfile[i].cfg;
-				if (enable) menumask |= t;	// Make hardfile selectable
+					if (enable) menumask |= t;	// Make hardfile selectable
 					MenuWrite(m++, s, menusub == n++, enable == 0);
-				t <<= 2;
+					t <<= 2;
+				}
 			}
-		}
 
 			while (m - firstmenu < OsdGetSize() - 1) MenuWrite(m++);
 			MenuWrite(m++, STD_BACK, menusub == 14, 0);
 
-		menustate = MENU_MINIMIG_DISK2;
+			menustate = MENU_MINIMIG_DISK2;
 
 			if (!adjvisible) break;
 			firstmenu += adjvisible;
@@ -6707,8 +6708,8 @@ void HandleUI(void)
 					fs_MenuSelect = MENU_MINIMIG_CD32FILE_SELECTED;
 					fs_MenuCancel = MENU_MINIMIG_DISK1;
 					strcpy(fs_pFileExt, "ISOCUECHDIMG");
-				if (select)
-				{
+					if (select)
+					{
 						if (!Selected_CD32[0]) memcpy(Selected_CD32, minimig_config.cd32_drive.filename, sizeof(Selected_CD32));
 						SelectFile(Selected_CD32, fs_pFileExt, fs_Options, fs_MenuSelect, fs_MenuCancel);
 					}
