@@ -26,6 +26,10 @@
 #include "user_io.h"
 #include "video.h"
 
+// video_reinit() is intentionally internal to upstream's video module. The
+// launcher uses it only for a bounded startup retry after video_init().
+extern void video_reinit();
+
 static const char s_launcher_path[] = "zaparoo/frontend";
 
 void alt_launcher_cfg_apply(void)
@@ -94,6 +98,9 @@ static pid_t s_pid = 0;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
 static unsigned long s_native_fb_mode_timer = 0;
+static unsigned long s_hdmi_fb_reassert_timer = 0;
+static int s_hdmi_fb_reasserts_remaining = 0;
+static unsigned long s_hdmi_edid_retry_timer = 0;
 static unsigned long s_tty_deadline = 0;
 static unsigned long s_native_crt_finish_timer = 0;
 static bool s_gave_up = false;
@@ -381,6 +388,9 @@ static void return_to_normal_mode(void)
 	else video_fb_enable(0);
 	s_native_crt = false;
 	s_respawn_timer = 0;
+	s_hdmi_fb_reassert_timer = 0;
+	s_hdmi_fb_reasserts_remaining = 0;
+	s_hdmi_edid_retry_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = true;
 	s_escaped = true;
@@ -392,6 +402,9 @@ static void reset_launcher_state(void)
 	s_respawn_timer = 0;
 	s_tty_deadline = 0;
 	s_native_fb_mode_timer = 0;
+	s_hdmi_fb_reassert_timer = 0;
+	s_hdmi_fb_reasserts_remaining = 0;
+	s_hdmi_edid_retry_timer = 0;
 	s_native_crt_finish_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = false;
@@ -437,6 +450,8 @@ static void wait_launcher_stopped(pid_t pid)
 
 static void release_launcher_video(void)
 {
+	s_hdmi_fb_reassert_timer = 0;
+	s_hdmi_fb_reasserts_remaining = 0;
 	if (s_native_crt)
 	{
 		s_native_crt = false;
@@ -519,7 +534,18 @@ static void finalize_spawn(void)
 	s_tty_deadline = 0;
 	switch_to_vt(s_vt);
 	if (!s_native_crt)
-		video_fb_enable(1);
+	{
+		// The frontend configures /dev/fb0 before Qt starts. Only publish its
+		// existing buffer here; rewriting the mode after Qt has painted clears
+		// the frame and leaves black until each region becomes dirty again.
+		video_fb_reassert();
+		// Returning to the menu can keep settling its video mode after the
+		// frontend is already ready. Re-assert across that init window so a
+		// late reset cannot leave a live framebuffer behind menu static.
+		s_hdmi_fb_reasserts_remaining = 5;
+		s_hdmi_fb_reassert_timer = GetTimer(1000);
+		if (!s_hdmi_fb_reassert_timer) s_hdmi_fb_reassert_timer = 1;
+	}
 	else
 		input_switch(0);
 
@@ -548,6 +574,10 @@ static void spawn(void)
 	}
 	else
 	{
+		// Accept the child's pre-Qt vmode request deterministically. Enabling only
+		// from finalize_spawn races the child: video_cmd ignores fb_cmd while the
+		// HPS framebuffer is disabled.
+		video_fb_enable(1);
 		printf("alt_launcher: HPS framebuffer path enabled\n");
 	}
 
@@ -585,7 +615,7 @@ bool alt_launcher_console_lease_active(void)
 
 bool alt_launcher_scheduler_sleep_enabled(void)
 {
-	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer || s_native_fb_mode_timer;
+	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer || s_native_fb_mode_timer || s_hdmi_fb_reassert_timer || s_hdmi_edid_retry_timer;
 }
 
 bool alt_launcher_native_crt(void)
@@ -601,19 +631,13 @@ void alt_launcher_init(bool native_crt)
 	s_respawn_timer = 0;
 	s_tty_deadline = 0;
 	s_native_crt = native_crt;
+	// user_io can request the launcher before video_init() has read EDID and
+	// selected the HDMI mode. Defer the child until that setup returns. If the
+	// first EDID read missed a slow monitor, allow one bounded retry after the
+	// link has had another 500 ms to settle.
+	s_hdmi_edid_retry_timer = native_crt ? 0 : GetTimer(500);
+	if (!native_crt && !s_hdmi_edid_retry_timer) s_hdmi_edid_retry_timer = 1;
 	s_init_pending = true;
-}
-
-static void alt_launcher_start(bool native_crt)
-{
-	if (!alt_launcher_configured() || s_pid || s_gave_up)
-		return;
-	s_crash_count = 0;
-	s_respawn_timer = 0;
-	s_tty_deadline = 0;
-	s_native_crt = native_crt;
-	s_init_pending = false;
-	spawn();
 }
 
 void alt_launcher_prepare_for_script(void)
@@ -766,11 +790,30 @@ void alt_launcher_poll(void)
 			s_native_fb_mode_timer = 0;
 		}
 
+		if (!s_native_crt && s_hdmi_fb_reassert_timer && CheckTimer(s_hdmi_fb_reassert_timer))
+		{
+			// Re-send scanout state without reconfiguring /dev/fb0 under Qt;
+			// resetting the live kernel framebuffer clears it until dirty repaint.
+			video_fb_reassert();
+			if (--s_hdmi_fb_reasserts_remaining > 0)
+			{
+				s_hdmi_fb_reassert_timer = GetTimer(2000);
+				if (!s_hdmi_fb_reassert_timer) s_hdmi_fb_reassert_timer = 1;
+			}
+			else
+			{
+				s_hdmi_fb_reassert_timer = 0;
+			}
+			printf("alt_launcher: HPS framebuffer path re-asserted (%d remaining)\n", s_hdmi_fb_reasserts_remaining);
+		}
+
 		int status;
 		if (waitpid(s_pid, &status, WNOHANG) == s_pid)
 		{
 			s_pid = 0;
 			s_tty_deadline = 0;
+			s_hdmi_fb_reassert_timer = 0;
+			s_hdmi_fb_reasserts_remaining = 0;
 			user_io_osd_key_enable(1);
 			bool exited = WIFEXITED(status);
 			int exit_status = exited ? WEXITSTATUS(status) : 0;
@@ -832,6 +875,13 @@ void alt_launcher_poll(void)
 
 	if (s_init_pending)
 	{
+		if (!s_native_crt && video_get_edid(NULL, NULL) == 0)
+		{
+			if (s_hdmi_edid_retry_timer && !CheckTimer(s_hdmi_edid_retry_timer)) return;
+			printf("alt_launcher: retrying EDID before frontend spawn\n");
+			video_reinit();
+		}
+		s_hdmi_edid_retry_timer = 0;
 		s_init_pending = false;
 		spawn();
 		return;
@@ -952,20 +1002,22 @@ void zaparoo_alt_launcher_init_for_core(void)
 	}
 }
 
-static void zaparoo_alt_launcher_prepare_menu_state(bool start)
+static void zaparoo_alt_launcher_prepare_menu_state(void)
 {
 	bool crt = load_persisted_native_crt();
 	printf("alt_launcher: initializing menu frontend (persisted crt=%d)\n", crt);
-	if (start) alt_launcher_start(crt);
-	else alt_launcher_init(crt);
+	alt_launcher_init(crt);
 }
 
 void zaparoo_alt_launcher_init_for_menu(void)
 {
-	zaparoo_alt_launcher_prepare_menu_state(false);
+	zaparoo_alt_launcher_prepare_menu_state();
 }
 
 void zaparoo_alt_launcher_start_for_menu(void)
 {
-	zaparoo_alt_launcher_prepare_menu_state(true);
+	// This hook runs before video_init(). Queue startup instead of forking
+	// immediately so EDID-selected output geometry is final before the frontend
+	// asks Main to choose a full or half framebuffer.
+	zaparoo_alt_launcher_prepare_menu_state();
 }
