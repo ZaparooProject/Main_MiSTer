@@ -4166,8 +4166,12 @@ void video_cmd(char *cmd)
 		{
 			if (div >= 1 && div <= 4)
 			{
+				// Pixel repetition doubles the physical output width while hact
+				// remains the logical source width. Apply the matching extra
+				// vertical divisor so the framebuffer keeps the output aspect.
+				int vdiv = div * (v_cur.param.pr ? 2 : 1);
 				width = v_cur.item[1] / div;
-				height = v_cur.item[5] / div;
+				height = v_cur.item[5] / vdiv;
 				hmin = vmin = 0;
 				hmax = v_cur.item[1] - 1;
 				vmax = v_cur.item[5] - 1;
@@ -4179,8 +4183,9 @@ void video_cmd(char *cmd)
 		{
 			if (div >= 1 && div <= 4)
 			{
+				int vdiv = div * (v_cur.param.pr ? 2 : 1);
 				width = v_cur.item[1] / div;
-				height = v_cur.item[5] / div;
+				height = v_cur.item[5] / vdiv;
 				hmin = vmin = 0;
 				hmax = v_cur.item[1] - 1;
 				vmax = v_cur.item[5] - 1;
