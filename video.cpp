@@ -3420,7 +3420,7 @@ static void fb_write_module_params()
 	});
 }
 
-void video_fb_enable(int enable, int n)
+static void video_fb_set(int enable, int n, int update_module)
 {
 	PROFILE_FUNCTION();
 
@@ -3462,7 +3462,7 @@ void video_fb_enable(int enable, int n)
 				//printf("Linux frame buffer: %dx%d, stride = %d bytes\n", fb_width, fb_height, fb_width * 4);
 				if (!fb_num)
 				{
-					fb_write_module_params();
+					if (update_module) fb_write_module_params();
 					input_switch(0);
 				}
 				else
@@ -3488,6 +3488,36 @@ void video_fb_enable(int enable, int n)
 		DisableIO();
 		if (cfg.direct_video) set_vga_fb(enable);
 		if (is_menu()) user_io_status_set("[8:5]", (fb_enabled && !fb_num) ? 0x160 : 0);
+	}
+}
+
+void video_fb_enable(int enable, int n)
+{
+	video_fb_set(enable, n, 1);
+}
+
+void video_fb_reassert()
+{
+	int fmt, rb, width, height, stride;
+	FILE *fp = fopen("/sys/module/MiSTer_fb/parameters/mode", "rt");
+	int fields = fp ? fscanf(fp, "%d %d %d %d %d", &fmt, &rb, &width, &height, &stride) : 0;
+	if (fp) fclose(fp);
+
+	if (fields == 5 && fmt == 8888 && rb == 1 && width > 0 && height > 0 && stride == width * 4)
+	{
+		// vmode may resize the launcher's live buffer after video_fb_config().
+		// Re-assert the kernel module's current RGB32 geometry, not stale menu geometry.
+		int configured_width = fb_width;
+		int configured_height = fb_height;
+		fb_width = width;
+		fb_height = height;
+		video_fb_set(1, 0, 0);
+		fb_width = configured_width;
+		fb_height = configured_height;
+	}
+	else
+	{
+		video_fb_set(1, 0, 0);
 	}
 }
 
@@ -4136,8 +4166,12 @@ void video_cmd(char *cmd)
 		{
 			if (div >= 1 && div <= 4)
 			{
+				// Pixel repetition doubles the physical output width while hact
+				// remains the logical source width. Apply the matching extra
+				// vertical divisor so the framebuffer keeps the output aspect.
+				int vdiv = div * (v_cur.param.pr ? 2 : 1);
 				width = v_cur.item[1] / div;
-				height = v_cur.item[5] / div;
+				height = v_cur.item[5] / vdiv;
 				hmin = vmin = 0;
 				hmax = v_cur.item[1] - 1;
 				vmax = v_cur.item[5] - 1;
@@ -4149,8 +4183,9 @@ void video_cmd(char *cmd)
 		{
 			if (div >= 1 && div <= 4)
 			{
+				int vdiv = div * (v_cur.param.pr ? 2 : 1);
 				width = v_cur.item[1] / div;
-				height = v_cur.item[5] / div;
+				height = v_cur.item[5] / vdiv;
 				hmin = vmin = 0;
 				hmax = v_cur.item[1] - 1;
 				vmax = v_cur.item[5] - 1;
