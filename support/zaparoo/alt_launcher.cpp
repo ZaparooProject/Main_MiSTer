@@ -576,8 +576,10 @@ static void spawn(void)
 	{
 		// Accept the child's pre-Qt vmode request deterministically. Enabling only
 		// from finalize_spawn races the child: video_cmd ignores fb_cmd while the
-		// HPS framebuffer is disabled.
-		video_fb_enable(1);
+		// HPS framebuffer is disabled. Re-assert without scheduling the launcher's
+		// current geometry back into the kernel; that delayed write can otherwise
+		// overwrite the child's smaller framebuffer after Qt has mapped it.
+		video_fb_reassert();
 		printf("alt_launcher: HPS framebuffer path enabled\n");
 	}
 
