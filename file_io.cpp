@@ -1034,6 +1034,16 @@ uint32_t getFileType(const char *name)
 	return st.st_mode;
 }
 
+uint64_t getFileSize(const char *name)
+{
+	make_fullpath(name);
+
+	struct stat64 st;
+	if (stat64(full_path, &st)) return 0;
+
+	return st.st_size;
+}
+
 static int findPrefixDir(const char *prefix, bool no_prefix_check, char *dir, size_t dir_len)
 {
 	// Searches for the core's folder in the following order:
