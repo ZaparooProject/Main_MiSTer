@@ -30,6 +30,7 @@
 
 #include "support.h"
 #include "support/arcade/mra_loader.h"
+#include "support/zaparoo/alt_launcher.h"
 #include "lib/imlib2/Imlib2.h"
 #include "lib/md5/md5.h"
 
@@ -3535,6 +3536,8 @@ int video_fb_state()
 static void video_fb_config()
 {
 	PROFILE_FUNCTION();
+
+	if (alt_launcher_handle_video_fb_config()) return;
 
 	int fb_scale = cfg.fb_size;
 

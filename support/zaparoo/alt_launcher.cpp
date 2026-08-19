@@ -620,6 +620,17 @@ bool alt_launcher_scheduler_sleep_enabled(void)
 	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer || s_native_fb_mode_timer || s_hdmi_fb_reassert_timer || s_hdmi_edid_retry_timer;
 }
 
+bool alt_launcher_handle_video_fb_config(void)
+{
+	if (s_native_crt || (!s_pid && !s_init_pending && !s_respawn_timer)) return false;
+
+	// Own HDMI fb configuration from queued initialization through the live
+	// child. This prevents pre-spawn module writes from landing after the
+	// frontend's vmode, and publishes its geometry against later output changes.
+	video_fb_reassert();
+	return true;
+}
+
 bool alt_launcher_native_crt(void)
 {
 	return s_native_crt && s_pid != 0;
