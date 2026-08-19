@@ -19,6 +19,8 @@ bool alt_launcher_native_crt_persisted(void);
 // Flips the persisted native CRT state and respawns the launcher to apply it.
 void alt_launcher_toggle_native_crt(void);
 bool alt_launcher_scheduler_sleep_enabled(void);
+// Preserves HDMI launcher fb0 across queued startup and live mode changes.
+bool alt_launcher_handle_video_fb_config(void);
 
 void alt_launcher_cfg_apply(void);
 uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button);
