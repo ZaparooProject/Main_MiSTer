@@ -5964,9 +5964,10 @@ void HandleUI(void)
 			}
 
 			MenuWrite(m++);
-			MenuWrite(m++, " Save configuration        \x16", menusub == 11, 0);
+			MenuWrite(m++, " Load preset               \x16", menusub == 11, 0);
 			MenuWrite(m++, " Load configuration        \x16", menusub == 12, 0);
-			MenuWrite(m++, " Load preset               \x16", menusub == 13, 0);
+			MenuWrite(m++, " Save configuration        \x16", menusub == 13, 0);
+			MenuWrite(m++);
 
 			while (m < 14) MenuWrite(m++);
 			MenuWrite(m++, " Reset", menusub == 14, 0);
@@ -6092,7 +6093,7 @@ void HandleUI(void)
 				else if (menusub == 11)
 				{
 					menusub = 0;
-					menustate = MENU_MINIMIG_SAVECONFIG1;
+					menustate = MENU_MINIMIG_PRESET1;
 				}
 				else if (menusub == 12)
 				{
@@ -6102,7 +6103,7 @@ void HandleUI(void)
 				else if (menusub == 13)
 				{
 					menusub = 0;
-					menustate = MENU_MINIMIG_PRESET1;
+					menustate = MENU_MINIMIG_SAVECONFIG1;
 				}
 				else if (menusub == 14)
 				{
@@ -6305,13 +6306,13 @@ void HandleUI(void)
 
 			if (menusub<10) minimig_cfg_save(menusub);
 			menustate = MENU_MINIMIG_MAIN1;
-			menusub = 11;
+			menusub = 13;
 		}
 		else
 		if (menu || left) // exit menu
 		{
 			menustate = MENU_MINIMIG_MAIN1;
-			menusub = 11;
+			menusub = 13;
 		}
 		break;
 
@@ -6375,13 +6376,13 @@ void HandleUI(void)
 			else if (menusub == 8)
 			{
 				menustate = MENU_MINIMIG_MAIN1;
-				menusub = 13;
+				menusub = 11;
 			}
 		}
 		if (menu || left)
 		{
 			menustate = MENU_MINIMIG_MAIN1;
-			menusub = 13;
+			menusub = 11;
 		}
 		break;
 
