@@ -109,3 +109,26 @@ void input_export_launcher_metadata(void)
 {
 	zaparoo_export_metadata(NULL);
 }
+
+// input_cb loads a device's maps on its first event: config/inputs lookups plus
+// both gamecontrollerdb files, ~300 ms cold on exFAT. Every /dev/input rescan
+// wipes that state, so the first press after boot or a hotplug paid it. Run the
+// same loads at open time instead by feeding input_cb a centred, unmapped axis
+// event, which is otherwise inert (it stops at the axis_pos compare). Menu core
+// only: the boot scan runs before the frontend is spawned, and game cores keep
+// stock behaviour.
+static void zaparoo_prewarm_device_maps(int n)
+{
+	if (mapping || !is_menu()) return;
+	for (int i = 0; i < n; i++)
+	{
+		if (pool[i].fd < 0 || input[i].mouse || input[i].force_joy) continue;
+		struct input_event ev = {};
+		ev.type = EV_ABS;
+		ev.code = ABS_MISC;
+		struct input_absinfo ai = {};
+		ai.minimum = -1;
+		ai.maximum = 1;
+		input_cb(&ev, &ai, i);
+	}
+}

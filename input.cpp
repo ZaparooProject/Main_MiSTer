@@ -2112,7 +2112,7 @@ static void uinp_check_key()
 {
 	if (uinp_fd > 0)
 	{
-		if (!grabbed)
+		if (!grabbed && !user_io_osd_is_visible())
 		{
 			if (uinp_ev.value && CheckTimer(uinp_repeat))
 			{
@@ -5588,6 +5588,7 @@ int input_test(int getchar)
 				setup_deadzone(&ev, i);
 			}
 			unflag_players();
+			if (alt_launcher_configured()) zaparoo_prewarm_device_maps(n);
 		}
 		cur_leds |= 0x80;
 		state++;
@@ -5624,7 +5625,7 @@ int input_test(int getchar)
 	if (state == 2)
 	{
 		int timeout = 0;
-		if (is_menu() && video_fb_state()) timeout = 25;
+		if (is_menu() && (video_fb_state() || alt_launcher_active())) timeout = 25;
 
 		while (1)
 		{
