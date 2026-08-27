@@ -1,9 +1,11 @@
 #include "alt_launcher.h"
+#include "crt_settings.h"
 #include "launcher_input_metadata.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,8 +14,10 @@
 #include <linux/input.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
+#include <dirent.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
 #include "cfg.h"
 #include "file_io.h"
@@ -31,6 +35,18 @@
 extern void video_reinit();
 
 static const char s_launcher_path[] = "zaparoo/frontend";
+
+// Timestamped trace line (ms since boot, same clock as GetTimer).
+static void zlog(const char *fmt, ...)
+{
+	printf("alt_launcher t=%lu: ", GetTimer(0));
+	va_list ap;
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	va_end(ap);
+	printf("\n");
+	fflush(stdout);
+}
 
 void alt_launcher_cfg_apply(void)
 {
@@ -95,6 +111,8 @@ bool alt_launcher_kbd_to_frontend(uint16_t code)
 }
 
 static pid_t s_pid = 0;
+static unsigned long s_spawn_time = 0;
+static bool s_pending_logged = false;
 static int s_crash_count = 0;
 static unsigned long s_respawn_timer = 0;
 static unsigned long s_native_fb_mode_timer = 0;
@@ -127,6 +145,12 @@ static void publish_console_state(const char *state, const char *nonce);
 // Frontend exit code requesting a respawn after it rewrote
 // zaparoo_launcher_crt.bin itself (launcher-owned CRT toggle).
 #define ALT_LAUNCHER_EXIT_RELOAD 42
+
+// A child alive this long is treated as stable: its exit does not count
+// toward the crash-loop give-up limit.
+#define ALT_LAUNCHER_STABLE_MS 10000
+
+static unsigned long s_fb_watchdog_timer = 0;
 
 // zaparoo_launcher_crt.bin layout (written by the frontend, and by the
 // OSD toggle below):
@@ -379,7 +403,10 @@ static void finish_native_crt_path(void)
 	if (!s_native_fb_mode_timer) s_native_fb_mode_timer = 1;
 }
 
-static void return_to_normal_mode(void)
+// escaped: the user quit the frontend, so the OSD reverts to stock for the
+// session. A crash-loop give-up keeps the trimmed OSD (and its Frontend
+// page) so CRT settings can still be fixed from there.
+static void return_to_normal_mode(bool escaped)
 {
 	user_io_osd_key_enable(1);
 	reset_launcher_tty();
@@ -393,7 +420,7 @@ static void return_to_normal_mode(void)
 	s_hdmi_edid_retry_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = true;
-	s_escaped = true;
+	s_escaped = escaped;
 }
 
 static void reset_launcher_state(void)
@@ -406,6 +433,7 @@ static void reset_launcher_state(void)
 	s_hdmi_fb_reasserts_remaining = 0;
 	s_hdmi_edid_retry_timer = 0;
 	s_native_crt_finish_timer = 0;
+	s_fb_watchdog_timer = 0;
 	s_crash_count = 0;
 	s_gave_up = false;
 	s_init_pending = false;
@@ -448,6 +476,51 @@ static void wait_launcher_stopped(pid_t pid)
 	}
 }
 
+// Kill frontend processes this Main did not spawn: a previous Main that was
+// killed (deploy) or crashed leaves its child holding fb0 and the VT. Matches
+// any exe under the launcher path so a binary renamed underneath a running
+// process (deploy rotates it to .bak) is caught too. Bounded wait.
+static void kill_stale_frontends(void)
+{
+	const char *prefix = getFullPath(s_launcher_path);
+	size_t plen = strlen(prefix);
+	pid_t self = getpid();
+	pid_t stale[16];
+	int n = 0;
+
+	DIR *d = opendir("/proc");
+	if (!d) return;
+	struct dirent *de;
+	while ((de = readdir(d)) && n < (int)(sizeof(stale) / sizeof(stale[0])))
+	{
+		if (de->d_name[0] < '0' || de->d_name[0] > '9') continue;
+		pid_t pid = (pid_t)atoi(de->d_name);
+		if (pid <= 1 || pid == self) continue;
+		char link[64], target[256];
+		snprintf(link, sizeof(link), "/proc/%d/exe", pid);
+		ssize_t len = readlink(link, target, sizeof(target) - 1);
+		if (len <= 0) continue;
+		target[len] = 0;
+		if (strncmp(target, prefix, plen)) continue;
+		stale[n++] = pid;
+		kill_launcher(pid, SIGKILL);
+	}
+	closedir(d);
+	if (!n) return;
+
+	zlog("killed %d stale frontend process(es), first pid=%d", n, stale[0]);
+	for (int i = 0; i < 100; i++)
+	{
+		bool alive = false;
+		for (int k = 0; k < n; k++)
+		{
+			if (!kill(stale[k], 0)) { alive = true; break; }
+		}
+		if (!alive) break;
+		usleep(10000);
+	}
+}
+
 static void release_launcher_video(void)
 {
 	s_hdmi_fb_reassert_timer = 0;
@@ -474,6 +547,9 @@ static void exec_launcher_child(const char *path)
 	sched_setaffinity(0, sizeof(set), &set);
 
 	setsid();
+	// Die with Main (a killed or crashed Main must not leave a frontend
+	// holding fb0 and the VT for the next Main to fight with).
+	prctl(PR_SET_PDEATHSIG, SIGKILL);
 
 	int tty_fd = open(s_tty_path, O_RDWR);
 	if (tty_fd >= 0)
@@ -525,14 +601,19 @@ static bool switch_to_vt(int vt)
 	return active;
 }
 
-static void finalize_spawn(void)
+static void finalize_spawn(bool tty_ready)
 {
 	// Defer the VT/fb takeover until the FPGA/HDMI has settled; s_tty_deadline
 	// stays armed so this retries on a later alt_launcher_poll pass.
-	if (!is_fpga_ready(1)) return;
+	if (!is_fpga_ready(1))
+	{
+		zlog("finalize deferred: fpga not ready");
+		return;
+	}
 
 	s_tty_deadline = 0;
-	switch_to_vt(s_vt);
+	bool vt_ok = switch_to_vt(s_vt);
+	zlog("finalize: tty_ready=%d vt_active=%d fb_state=%d", tty_ready, vt_ok, video_fb_state());
 	if (!s_native_crt)
 	{
 		// The frontend configures /dev/fb0 before Qt starts. Only publish its
@@ -566,7 +647,7 @@ static void spawn(void)
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 
-	printf("alt_launcher: native_crt=%d\n", s_native_crt);
+	zlog("spawn: native_crt=%d fb_state=%d edid=%d menu_present=%d", s_native_crt, video_fb_state(), video_get_edid(NULL, NULL), menu_present());
 	if (s_native_crt)
 	{
 		prepare_native_crt_path();
@@ -593,11 +674,12 @@ static void spawn(void)
 		else video_fb_enable(0);
 		return;
 	}
-	printf("alt_launcher: spawned pid=%d path=%s\n", s_pid, path);
 	if (!s_pid)
 	{
 		exec_launcher_child(path);
 	}
+	s_spawn_time = GetTimer(0);
+	zlog("spawned pid=%d path=%s", s_pid, path);
 
 	input_export_launcher_metadata();
 
@@ -608,6 +690,11 @@ static void spawn(void)
 bool alt_launcher_active(void)
 {
 	return s_pid != 0;
+}
+
+bool alt_launcher_owns_screen(void)
+{
+	return s_pid != 0 || s_init_pending || s_respawn_timer != 0;
 }
 
 bool alt_launcher_console_lease_active(void)
@@ -651,6 +738,8 @@ void alt_launcher_init(bool native_crt)
 	s_hdmi_edid_retry_timer = native_crt ? 0 : GetTimer(500);
 	if (!native_crt && !s_hdmi_edid_retry_timer) s_hdmi_edid_retry_timer = 1;
 	s_init_pending = true;
+	s_pending_logged = false;
+	zlog("init queued: native_crt=%d edid=%d fb_state=%d", native_crt, video_get_edid(NULL, NULL), video_fb_state());
 }
 
 void alt_launcher_prepare_for_script(void)
@@ -817,7 +906,7 @@ void alt_launcher_poll(void)
 			{
 				s_hdmi_fb_reassert_timer = 0;
 			}
-			printf("alt_launcher: HPS framebuffer path re-asserted (%d remaining)\n", s_hdmi_fb_reasserts_remaining);
+			zlog("HPS framebuffer path re-asserted (%d remaining)", s_hdmi_fb_reasserts_remaining);
 		}
 
 		int status;
@@ -831,8 +920,9 @@ void alt_launcher_poll(void)
 			bool exited = WIFEXITED(status);
 			int exit_status = exited ? WEXITSTATUS(status) : 0;
 			int sig = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
-			bool escaped = (exited && exit_status == 0) || sig == SIGTERM || sig == SIGINT;
-			bool crashed = !escaped && (sig != 0 || (exited && exit_status != 0));
+			unsigned long uptime = GetTimer(0) - s_spawn_time;
+			zlog("child exit: exited=%d code=%d sig=%d uptime=%lu ms crash_count=%d native_crt=%d",
+			     exited, exit_status, sig, uptime, s_crash_count, s_native_crt);
 			// The frontend rewrote zaparoo_launcher_crt.bin itself and wants
 			// to be respawned under the new setting — release the current
 			// video path and re-enter through the normal init machinery.
@@ -847,39 +937,47 @@ void alt_launcher_poll(void)
 				alt_launcher_init(crt);
 				return;
 			}
-			// Any exit while in CRT mode drops back to HDMI / no frontend
-			// for the rest of this session — respawning into CRT after the
-			// user already left it is a UX trap. The persisted CRT
-			// preference is intentionally untouched (return_to_normal_mode
-			// only clears the in-memory s_native_crt), so the next reboot
-			// honors whatever the user last set in System Settings.
-			if (s_native_crt)
-			{
-				printf("alt_launcher: exited while in CRT mode, dropping to HDMI normal mode\n");
-				return_to_normal_mode();
-				return;
-			}
-			if (escaped)
+			// Only a clean exit is the user leaving the frontend. Signals
+			// (including an external kill during a deploy) and non-zero codes
+			// respawn. A child that ran long enough was not crash-looping, so
+			// its exit restarts the strike count instead of adding to it.
+			if (exited && exit_status == 0)
 			{
 				printf("alt_launcher: exited, returning to normal mode until restart\n");
-				return_to_normal_mode();
+				return_to_normal_mode(true);
 				return;
 			}
-			if (crashed && ++s_crash_count >= 3)
+			if (uptime >= ALT_LAUNCHER_STABLE_MS) s_crash_count = 0;
+			if (++s_crash_count >= 3)
 			{
 				printf("alt_launcher: giving up after 3 crashes\n");
-				return_to_normal_mode();
+				return_to_normal_mode(false);
 				return;
 			}
-			if (!crashed)
-				s_crash_count = 0;
 			s_respawn_timer = GetTimer(1000);
 			if (!s_respawn_timer) s_respawn_timer = 1;
 			return;
 		}
 
-		if (s_tty_deadline && !s_native_crt_finish_timer && (launcher_tty_ready(s_pid) || CheckTimer(s_tty_deadline)))
-			finalize_spawn();
+		// Nothing legitimately turns the HPS framebuffer off under a live
+		// HDMI frontend, but an HDMI hot-plug re-init (video_reinit ->
+		// video_menu_bg) does exactly that. Re-assert so the frontend's
+		// startup vmode probes and its later output never land on a
+		// disabled framebuffer.
+		if (!s_native_crt && !video_fb_state() && (!s_fb_watchdog_timer || CheckTimer(s_fb_watchdog_timer)))
+		{
+			s_fb_watchdog_timer = GetTimer(250);
+			if (!s_fb_watchdog_timer) s_fb_watchdog_timer = 1;
+			video_fb_reassert();
+			zlog("watchdog: framebuffer was off, re-asserted (fb_state=%d)", video_fb_state());
+		}
+
+		if (s_tty_deadline && !s_native_crt_finish_timer)
+		{
+			bool tty_ready = launcher_tty_ready(s_pid);
+			if (tty_ready || CheckTimer(s_tty_deadline))
+				finalize_spawn(tty_ready);
+		}
 		return;
 	}
 
@@ -888,11 +986,17 @@ void alt_launcher_poll(void)
 
 	if (s_init_pending)
 	{
+		if (!s_pending_logged)
+		{
+			s_pending_logged = true;
+			zlog("first poll: edid=%d fb_state=%d fpga_ready=%d", video_get_edid(NULL, NULL), video_fb_state(), is_fpga_ready(1));
+		}
 		if (!s_native_crt && video_get_edid(NULL, NULL) == 0)
 		{
 			if (s_hdmi_edid_retry_timer && !CheckTimer(s_hdmi_edid_retry_timer)) return;
-			printf("alt_launcher: retrying EDID before frontend spawn\n");
+			unsigned long t0 = GetTimer(0);
 			video_reinit();
+			zlog("edid retry: video_reinit took %lu ms, edid=%d", GetTimer(0) - t0, video_get_edid(NULL, NULL));
 		}
 		s_hdmi_edid_retry_timer = 0;
 		s_init_pending = false;
@@ -903,14 +1007,17 @@ void alt_launcher_poll(void)
 	if (s_respawn_timer && CheckTimer(s_respawn_timer))
 	{
 		s_respawn_timer = 0;
+		zlog("respawn timer fired");
 		spawn();
 	}
 }
 
 void alt_launcher_shutdown(void)
 {
+	fflush(stdout);
 	if (!s_pid)
 	{
+		if (alt_launcher_configured()) kill_stale_frontends();
 		reset_launcher_state();
 		if (s_native_crt)
 		{
@@ -963,13 +1070,41 @@ bool alt_launcher_native_crt_persisted(void)
 	return load_persisted_native_crt();
 }
 
+uint8_t alt_launcher_native_crt_mode(void)
+{
+	bool enabled;
+	uint8_t mode;
+	load_persisted_native_crt_state(&enabled, &mode);
+	return mode;
+}
+
+// Stop a running launcher and queue a fresh start under `crt`: the same
+// re-entry steps as the ALT_LAUNCHER_EXIT_RELOAD path in alt_launcher_poll.
+static void restart_launcher(bool crt)
+{
+	if (s_pid) wait_launcher_stopped(s_pid);
+	user_io_osd_key_enable(1);
+	release_launcher_video();
+	reset_launcher_tty();
+	s_respawn_timer = 0;
+	s_crash_count = 0;
+	// Re-arm after an earlier give-up or escape: an explicit OSD action
+	// is the user asking for the frontend back.
+	s_gave_up = false;
+	s_escaped = false;
+	alt_launcher_init(crt);
+}
+
+void alt_launcher_respawn(void)
+{
+	restart_launcher(load_persisted_native_crt());
+}
+
 void alt_launcher_toggle_native_crt(void)
 {
-	// The OSD's System Settings toggle. Same contract as the frontend's
-	// in-app toggle: flip byte 0 of the state file (byte 1 - the video
-	// standard - is preserved), then respawn the launcher under the new
-	// setting via the same re-entry steps as the ALT_LAUNCHER_EXIT_RELOAD
-	// path in alt_launcher_poll.
+	// The OSD toggle. Same contract as the frontend's in-app toggle: flip
+	// byte 0 of the state file (byte 1 - the video standard - is preserved),
+	// then respawn the launcher under the new setting.
 	uint8_t v[2] = {0, 0};
 	FileLoadConfig(s_crt_state_file, v, sizeof(v));
 	if (v[1] > 2) v[1] = 0;
@@ -980,22 +1115,26 @@ void alt_launcher_toggle_native_crt(void)
 		return;
 	}
 	printf("alt_launcher: OSD CRT toggle -> enabled=%d mode=%d\n", v[0], v[1]);
+	restart_launcher(v[0] != 0);
+}
 
-	if (s_pid)
+void alt_launcher_set_native_crt_mode(uint8_t mode)
+{
+	// Byte 1 of the state file sizes the framebuffer on this side; the
+	// frontend reads the same standard from frontend.toml, so both are
+	// written before the respawn.
+	uint8_t v[2] = {0, 0};
+	FileLoadConfig(s_crt_state_file, v, sizeof(v));
+	if (mode > 2) mode = 0;
+	v[1] = mode;
+	if (!FileSaveConfig(s_crt_state_file, v, sizeof(v)))
 	{
-		pid_t pid = s_pid;
-		wait_launcher_stopped(pid);
+		printf("alt_launcher: OSD video standard: could not write %s\n", s_crt_state_file);
+		return;
 	}
-	user_io_osd_key_enable(1);
-	release_launcher_video();
-	reset_launcher_tty();
-	s_respawn_timer = 0;
-	s_crash_count = 0;
-	// Re-arm after an earlier give-up or escape: an explicit OSD toggle
-	// is the user asking for the frontend back.
-	s_gave_up = false;
-	s_escaped = false;
-	alt_launcher_init(v[0] != 0);
+	crt_toml_set_standard(mode);
+	printf("alt_launcher: OSD video standard -> mode=%d (enabled=%d)\n", mode, v[0]);
+	if (v[0]) restart_launcher(true);
 }
 
 bool zaparoo_is_native_core(void)

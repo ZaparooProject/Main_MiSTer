@@ -446,7 +446,7 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 	printf("Loading RBF: %s\n", name);
 
 	if(name[0] == '/') strcpy(path, name);
-	else sprintf(path, "%s/%s", is_menu_rbf(name) ? getStorageDir(0) : getRootDir(), name);
+	else sprintf(path, "%s/%s", is_menu_rbf(name) ? getStorageDir(0) : getRootDir(), is_menu_rbf(name) ? menu_rbf_name() : name);
 
 	int rbf = open(path, O_RDONLY);
 	if (rbf < 0)

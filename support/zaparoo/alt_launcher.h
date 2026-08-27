@@ -12,12 +12,21 @@ void alt_launcher_resume_after_script(void);
 bool alt_launcher_command(const char *cmd);
 bool alt_launcher_native_crt(void);
 bool alt_launcher_active(void);
+// True from the moment a launcher start is queued (or a respawn is pending)
+// until the child exits: the OSD must not auto-open over that window.
+bool alt_launcher_owns_screen(void);
 bool alt_launcher_console_lease_active(void);
 bool alt_launcher_configured(void);
 // Returns the persisted native CRT enable state used by launcher restarts.
 bool alt_launcher_native_crt_persisted(void);
 // Flips the persisted native CRT state and respawns the launcher to apply it.
 void alt_launcher_toggle_native_crt(void);
+// Persisted video standard (state-file byte 1, see crt_settings.h).
+uint8_t alt_launcher_native_crt_mode(void);
+// Persists a new standard (state file + frontend.toml) and respawns a CRT launcher.
+void alt_launcher_set_native_crt_mode(uint8_t mode);
+// Restarts the launcher under the persisted CRT setting.
+void alt_launcher_respawn(void);
 bool alt_launcher_scheduler_sleep_enabled(void);
 // Preserves HDMI launcher fb0 across queued startup and live mode changes.
 bool alt_launcher_handle_video_fb_config(void);
