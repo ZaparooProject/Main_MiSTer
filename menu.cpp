@@ -52,6 +52,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "menu.h"
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/alt_launcher_menu.h"
+#include "support/zaparoo/launcher_pages.h"
 #include "support/zaparoo/menu_rbf.h"
 #include "user_io.h"
 #include "debug.h"
@@ -233,6 +234,11 @@ enum MENU
 	// Atari 8bit cartridge type selection
 	MENU_ATARI8BIT_CART1,
 	MENU_ATARI8BIT_CART2,
+	// Zaparoo frontend pages (support/zaparoo/launcher_pages.h)
+	MENU_ZAPAROO_FRONTEND1,
+	MENU_ZAPAROO_FRONTEND2,
+	MENU_ZAPAROO_POSITION1,
+	MENU_ZAPAROO_POSITION2,
 };
 
 static uint32_t menustate = MENU_NONE1;
@@ -1623,7 +1629,7 @@ void HandleUI(void)
 		// the user closes it (in CRT mode video_fb_state is false), so the OSD
 		// could never actually close. Suppress the auto-open in that case;
 		// explicit F12/MENU presses still open and close it normally.
-		else if (menu || (is_menu() && !video_fb_state() && !alt_launcher_active()) || (menustate == MENU_NONE2 && !mgl->done && mgl->state == 1))
+		else if (menu || (is_menu() && !video_fb_state() && !alt_launcher_owns_screen()) || (menustate == MENU_NONE2 && !mgl->done && mgl->state == 1))
 		{
 			OsdSetSize(16);
 			menusub = 0;
@@ -7260,7 +7266,7 @@ void HandleUI(void)
 		else if (select)
 		{
 			int dispatch = alt_launcher_translate_system_select(menusub);
-			if (dispatch < 0) { menustate = MENU_SYSTEM1; break; }
+			if (dispatch < 0) { menustate = (dispatch == -2) ? MENU_ZAPAROO_FRONTEND1 : MENU_SYSTEM1; if (dispatch == -2) menusub = 0; break; }
 			switch (dispatch)
 			{
 			case 0:
@@ -7334,6 +7340,81 @@ void HandleUI(void)
 		}
 
 		if (!hold_cnt && reboot_req) fpga_load_rbf(menu_rbf_name());
+		break;
+
+		/******************************************************************/
+		/* zaparoo frontend pages (reached from System Settings)          */
+		/******************************************************************/
+	case MENU_ZAPAROO_FRONTEND1:
+		if (!alt_launcher_configured())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		parentstate = menustate;
+		frontend_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_FRONTEND2;
+		break;
+
+	case MENU_ZAPAROO_FRONTEND2:
+		if (menu)
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		if (left || back)
+		{
+			menustate = MENU_SYSTEM1;
+			menusub = 3;
+			break;
+		}
+		if (select || (right && menusub == 2))
+		{
+			int act = frontend_page_select(menusub);
+			if (act == 1)
+			{
+				menustate = MENU_ZAPAROO_POSITION1;
+				menusub = 0;
+			}
+			else if (act == 2)
+			{
+				menustate = MENU_SYSTEM1;
+				menusub = 3;
+			}
+			else
+			{
+				menustate = MENU_ZAPAROO_FRONTEND1;
+			}
+		}
+		break;
+
+	case MENU_ZAPAROO_POSITION1:
+		if (!alt_launcher_configured())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		if (parentstate != MENU_ZAPAROO_POSITION1) position_page_enter();
+		parentstate = menustate;
+		position_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_POSITION2;
+		break;
+
+	case MENU_ZAPAROO_POSITION2:
+		if (menu || back || (select && position_page_is_exit(menusub)))
+		{
+			position_page_leave();
+			menustate = MENU_ZAPAROO_FRONTEND1;
+			menusub = 2;
+			break;
+		}
+		if (left || right || plus || minus)
+		{
+			position_page_adjust(menusub, (right || plus) ? 1 : -1);
+			menustate = MENU_ZAPAROO_POSITION1;
+		}
 		break;
 
 	case MENU_JOYSYSMAP:

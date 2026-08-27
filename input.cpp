@@ -6307,6 +6307,10 @@ int input_test(int getchar)
 					if (sysled_is_enabled || video_fb_state()) DISKLED_ON;
 				}
 				lseek(pool[NUMDEV + 2].fd, 0, SEEK_SET);
+				// Zaparoo: an LED-only wakeup (SD activity blinks the mmc trigger at kHz
+				// rates) must not keep draining, or the idle timeout never fires and the
+				// UI cothread starves.
+				if (return_value == 1) break;
 			}
 		}
 
