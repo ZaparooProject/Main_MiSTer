@@ -84,31 +84,19 @@ auto-open uses `_active`. A user with the frontend binary present but not yet
 running sees different OSD behavior than a user without the binary at all —
 worth either a comment or a unified helper.
 
-### 2.3 Two persistence files, no shared format
-Current state:
+### 2.3 CRT persistence is split across two files
+Current state (shared with the frontend, which owns the format):
 
 ```
-zaparoo_launcher_crt.bin     1 byte   (CRT mode flag)
-zaparoo_video_offsets.bin    2 bytes  (h_offset, v_offset)
+config/zaparoo_launcher_crt.bin   2 bytes  byte 0 enabled, byte 1 standard (0 NTSC, 1 480i, 2 PAL)
+zaparoo/frontend.toml [settings]  crt_video_standard = "ntsc"|"pal", crt_h_offset, crt_v_offset
 ```
 
-Same dir, same `FileSaveConfig` API, but no unified struct. If a third setting
-arrives this becomes a per-feature file pattern. A single `zaparoo_state.bin`
-with a versioned struct would scale better:
-
-```c
-struct zaparoo_state_v1 {
-    uint8_t magic;     // 'Z'
-    uint8_t version;   // 1
-    uint8_t crt;       // 0 / 1
-    int8_t  h_offset;  // -8..+7
-    int8_t  v_offset;  // -8..+7
-    uint8_t reserved[3];
-};
-```
-
-Cost: a one-shot migration on existing installs (read legacy `crt.bin` if
-new file is missing; never write the legacy file again).
+Main reads the state file at menu init and on every CRT spawn (it sizes the
+framebuffer from byte 1) and only touches the toml keys with single-line
+in-place edits (`crt_settings.cpp`). The standard is therefore stored twice;
+they are written together so they cannot drift, but a unified contract on the
+frontend side would remove the duplication.
 
 ### 2.4 Hardcoded paths scattered across modules
 - Frontend path: `zaparoo/frontend` in `alt_launcher.cpp:22`

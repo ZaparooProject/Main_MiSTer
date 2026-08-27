@@ -108,10 +108,16 @@ void position_page_leave(void)
 	if (s_pattern)
 	{
 		crt_test_pattern_unpublish();
-		s_pattern = false;
+		s_pattern = crt_test_pattern_active();
 	}
 	if (s_h == s_h0 && s_v == s_v0) return;
-	crt_toml_set_offsets(s_h, s_v);
+	if (!crt_toml_set_offsets(s_h, s_v))
+	{
+		printf("launcher_pages: offsets not saved, frontend left running\n");
+		return;
+	}
+	s_h0 = s_h;
+	s_v0 = s_v;
 	// A running frontend caches its trims at start and would write the old
 	// values back on its next settings save.
 	if (alt_launcher_active()) alt_launcher_respawn();

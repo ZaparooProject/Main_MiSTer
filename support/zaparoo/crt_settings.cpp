@@ -48,11 +48,13 @@ static char *toml_read(size_t *len)
 	if (f)
 	{
 		*len = fread(buf, 1, s_toml_max, f);
+		// A read error, a file larger than the buffer, or embedded NULs:
+		// refuse rather than write back a truncated or misread file.
+		bool bad = ferror(f) || fgetc(f) != EOF;
 		fclose(f);
 		buf[*len] = 0;
-		if (memchr(buf, 0, *len))
+		if (bad || memchr(buf, 0, *len))
 		{
-			// Not a text file we understand; refuse to rewrite it.
 			free(buf);
 			return NULL;
 		}
@@ -318,13 +320,13 @@ bool crt_test_pattern_publish(uint8_t mode, int h, int v)
 void crt_test_pattern_unpublish(void)
 {
 	if (!s_pattern_active) return;
-	s_pattern_active = false;
 	void *p = shmem_map(s_native_addr, 0x1000);
 	if (!p) return;
 	volatile uint32_t *words = (volatile uint32_t *)p;
 	words[0] = 0;
 	__sync_synchronize();
 	shmem_unmap(p, 0x1000);
+	s_pattern_active = false;
 }
 
 bool crt_test_pattern_active(void)

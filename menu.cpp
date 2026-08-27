@@ -7392,6 +7392,7 @@ void HandleUI(void)
 	case MENU_ZAPAROO_POSITION1:
 		if (!alt_launcher_configured())
 		{
+			position_page_leave();
 			menustate = MENU_NONE1;
 			break;
 		}
