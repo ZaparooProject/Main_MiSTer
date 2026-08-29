@@ -56,9 +56,7 @@ void alt_launcher_cfg_apply(void)
 	// /tmp/OSD_VISIBLE, the gameid log).
 	cfg.recents = 1;
 	cfg.log_file_entry = 1;
-	// The frontend needs fb_terminal on to render. Kiosk without a frontend
-	// wants it off, so the menu core scans its own video (snow) instead.
-	cfg.fb_terminal = (zaparoo_kiosk_active() && !alt_launcher_configured()) ? 0 : 1;
+	cfg.fb_terminal = 1;
 }
 
 static bool s_escaped = false;
@@ -1130,8 +1128,8 @@ static void stop_launcher(bool restore_bg)
 	user_io_osd_key_enable(1);
 	release_launcher_video();
 	reset_launcher_tty();
-	// Menu core only, and kiosk wants the core's own snow back, not wallpaper.
-	if (restore_bg && is_menu()) video_menu_bg(zaparoo_kiosk_active() ? 0 : user_io_status_get("[3:1]"));
+	// Menu core only: on a game core there is no menu background to restore.
+	if (restore_bg && is_menu()) video_menu_bg(user_io_status_get("[3:1]"));
 	s_respawn_timer = 0;
 	s_tty_deadline = 0;
 	s_init_pending = false;
