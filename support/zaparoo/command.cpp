@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "alt_launcher.h"
+#include "cheat.h"
 #include "kiosk.h"
 #include "mount.h"
 #include "save.h"
@@ -53,34 +54,16 @@ bool zaparoo_command(const char *cmd)
 		return true;
 	}
 
-	// Force the running core to write its save. The optional argument is a
-	// fixed hold in ms for characterising cores, not for normal use.
-	if (!strncmp(cmd, "zaparoo_save", 12) && (!cmd[12] || cmd[12] == ' ' || cmd[12] == '\t' || cmd[12] == '\r'))
+	// Force the running core to write its save.
+	if (tok_eq(cmd, "zaparoo_save"))
 	{
-		const char *arg = cmd + 12;
-		while (*arg == ' ' || *arg == '\t') arg++;
-		unsigned hold = 0;
-		if (*arg && *arg != '\r')
-		{
-			char *end = 0;
-			long v = strtol(arg, &end, 10);
-			while (end && (*end == ' ' || *end == '\t' || *end == '\r')) end++;
-			if (!end || *end || v < 1 || v > 10000)
-			{
-				printf("zaparoo_command: bad argument: %s\n", cmd);
-				return true;
-			}
-			hold = (unsigned)v;
-		}
-		zaparoo_save_request(hold);
+		zaparoo_save_request();
 		return true;
 	}
 
-	if (!strncmp(cmd, "zaparoo_pause ", 14))
+	if (!strncmp(cmd, "zaparoo_cheat ", 14))
 	{
-		int state = parse_toggle(cmd + 14, zaparoo_pause_active());
-		if (state < 0) printf("zaparoo_command: bad argument: %s\n", cmd);
-		else zaparoo_pause_set(state != 0);
+		zaparoo_cheat_command(cmd + 14);
 		return true;
 	}
 

@@ -9,6 +9,11 @@ void cheats_print();
 void cheats_toggle();
 int cheats_loaded();
 
+const char *cheats_get_name(int idx);
+bool cheats_get_enabled(int idx);
+int cheats_get_selected();
+void cheats_set_selected(int idx);
+
 void cheats_init_arcade(int unit_size, int max_active);
 void cheats_add_arcade(const char *name, const char *cheatData, int cheatSize);
 void cheats_finalize_arcade();

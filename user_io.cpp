@@ -3327,6 +3327,7 @@ void user_io_poll()
 				blks = 1;
 			}
 			DisableIO();
+			if (op == 2) zaparoo_save_note_write();
 			if ( sd_type[disk] == SD_TYPE_A2)
 			{
 				//if (op) printf("A2 %x %llu on %d\n", op,lba, disk);
@@ -3361,7 +3362,7 @@ void user_io_poll()
 			{
 				//printf("SD WR %llu on %d\n", lba, disk);
 
-				if (use_save) { menu_process_save(); zaparoo_save_note_write(); }
+				if (use_save) menu_process_save();
 
 				buffer_lba[disk] = -1;
 

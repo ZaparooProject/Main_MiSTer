@@ -129,7 +129,7 @@ void autosave_page_render(int menusub, uint64_t *menumask)
 	OsdWrite(m++, " save.");
 	OsdWrite(m++, "");
 	OsdWrite(m++, " Adds about half a second");
-	OsdWrite(m++, " when a game has a save.");
+	OsdWrite(m++, " to each game launch.");
 	OsdWrite(m++, "");
 	OsdWrite(m++, "  Do you want to continue?");
 	OsdWrite(m++, "            No", menusub == 0);

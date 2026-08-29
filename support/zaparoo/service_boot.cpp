@@ -1,9 +1,20 @@
 #include <fcntl.h>
 #include <signal.h>
+#include <stdio.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 static const char s_service_script[] = "/media/fat/Scripts/zaparoo.sh";
+
+// A tty is line-buffered already, but stdout redirected to a file is not, so
+// diagnostics sit in the buffer and a captured log reads as empty or truncated.
+// Set it once here, before main() and before anything prints, so plain printf
+// works everywhere including upstream's own output. Declared before the service
+// constructor so it runs first within this file.
+__attribute__((constructor)) static void zaparoo_stdout_linebuf(void)
+{
+	setvbuf(stdout, NULL, _IOLBF, 0);
+}
 
 // Runs before main(): ahead of the core-1 affinity pin (a forked child would
 // inherit it) and ahead of FindStorage(), which can block 30s waiting for USB.

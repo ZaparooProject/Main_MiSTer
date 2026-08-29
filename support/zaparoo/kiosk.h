@@ -17,5 +17,8 @@ void zaparoo_kiosk_set(bool on);
 // and lost on the next core load because that re-execs Main, so a bypass can
 // never be left behind.
 bool zaparoo_kiosk_bypassed(void);
+
+// Delivers the synthetic F12 release armed by zaparoo_kiosk_osd_open().
+void zaparoo_kiosk_poll(void);
 void zaparoo_kiosk_osd_open(void);
 void zaparoo_kiosk_osd_close(void);

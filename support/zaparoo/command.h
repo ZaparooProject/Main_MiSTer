@@ -8,9 +8,9 @@
 //   zaparoo_kiosk    on|off|toggle          (persisted)
 //   zaparoo_frontend on|off|toggle          (persisted)
 //   zaparoo_osd      open|close|toggle      (session-only kiosk bypass)
-//   zaparoo_save     [hold_ms]              (force the core to write its save)
-//   zaparoo_pause    on|off|toggle
+//   zaparoo_save                            (force the core to write its save)
 //   zaparoo_mount    <pos> [path]          (disk swap, 1-based, no path ejects)
+//   zaparoo_cheat    on|off|toggle <name|index> | clear | list [text]
 //
 // Returns true when the command was recognised.
 bool zaparoo_command(const char *cmd);
