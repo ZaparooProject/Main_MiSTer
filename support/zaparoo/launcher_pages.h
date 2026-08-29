@@ -3,14 +3,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// OSD fallback for the frontend's CRT settings: the "Frontend" page reached
-// from System Settings, and its "Position" sub-page. Renderers write the OSD
-// directly (the pages fit in 16 rows); menu.cpp owns the state machine.
+// The "Zaparoo" page reached from System Settings, its "Position" sub-page and
+// the kiosk confirmation. Renderers write the OSD directly (the pages fit in
+// 16 rows); menu.cpp owns the state machine.
 
-// Rows: 0 CRT mode, 1 Video standard (CRT on), 2 Screen position (CRT on), 3 exit.
+// Rows: 0 Frontend, 1 Kiosk mode, 2 CRT mode, 3 Video standard (CRT on),
+// 4 Screen position (CRT on), 5 exit.
 void frontend_page_render(int menusub, uint64_t *menumask);
-// Select on the highlighted row: 0 redraw, 1 enter Position, 2 leave the page.
+// Select on the highlighted row: 0 redraw, 1 enter Position, 2 leave the page,
+// 3 enter the kiosk confirmation.
 int frontend_page_select(int menusub);
+
+// Kiosk confirmation. Rows: 0 No, 1 Yes. Enabling kiosk closes the OSD, so the
+// caller must not keep rendering after confirm() returns true.
+void kiosk_page_render(int menusub, uint64_t *menumask);
+bool kiosk_page_confirm(int menusub);
 
 // Rows: 0 H offset, 1 V offset, 2 back. enter() snapshots the persisted trims
 // and, with no frontend running, publishes an alignment pattern; leave()

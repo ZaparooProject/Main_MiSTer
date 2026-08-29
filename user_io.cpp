@@ -1469,7 +1469,7 @@ void user_io_init(const char *path, const char *xml)
 	user_io_read_confstr();
 	user_io_read_core_name();
 
-	if ((fpga_get_buttons() & BUTTON_OSD) && is_menu())
+	if ((fpga_get_buttons() & BUTTON_OSD) && is_menu() && !zaparoo_kiosk_active())
 	{
 		altcfg(0);
 		SelectINI();

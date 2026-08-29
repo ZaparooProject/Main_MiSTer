@@ -12,23 +12,30 @@
 void frontend_page_render(int menusub, uint64_t *menumask)
 {
 	OsdSetSize(16);
-	OsdSetTitle("Frontend", OSD_ARROW_LEFT);
+	OsdSetTitle("Zaparoo", OSD_ARROW_LEFT);
 	bool crt = alt_launcher_native_crt_persisted();
-	*menumask = crt ? 0xF : 0x9;
+	*menumask = crt ? 0x3F : 0x27;
 
 	char s[64];
 	int m = 0;
 	OsdWrite(m++, "");
-	sprintf(s, " CRT mode:               %s", crt ? " On" : "Off");
+	// enabled(), not configured(): the row must not read Off just because the
+	// user quit the frontend this session.
+	sprintf(s, " Frontend:               %s", alt_launcher_enabled() ? " On" : "Off");
 	OsdWrite(m++, s, menusub == 0);
+	sprintf(s, " Kiosk mode:             %s", zaparoo_kiosk_active() ? " On" : "Off");
+	OsdWrite(m++, s, menusub == 1);
+	OsdWrite(m++, "");
+	sprintf(s, " CRT mode:               %s", crt ? " On" : "Off");
+	OsdWrite(m++, s, menusub == 2);
 	if (crt)
 	{
 		sprintf(s, " Video standard:         %4s", crt_standard_name(alt_launcher_native_crt_mode()));
-		OsdWrite(m++, s, menusub == 1);
-		OsdWrite(m++, " Screen position           \x16", menusub == 2);
+		OsdWrite(m++, s, menusub == 3);
+		OsdWrite(m++, " Screen position           \x16", menusub == 4);
 	}
 	while (m < OsdGetSize() - 1) OsdWrite(m++, "");
-	OsdWrite(15, PAGE_STD_EXIT, menusub == 3);
+	OsdWrite(15, PAGE_STD_EXIT, menusub == 5);
 }
 
 int frontend_page_select(int menusub)
@@ -36,16 +43,55 @@ int frontend_page_select(int menusub)
 	switch (menusub)
 	{
 	case 0:
-		alt_launcher_toggle_native_crt();
+		alt_launcher_set_enabled(!alt_launcher_enabled());
 		return 0;
 	case 1:
+		return 3;
+	case 2:
+		alt_launcher_toggle_native_crt();
+		return 0;
+	case 3:
 		alt_launcher_set_native_crt_mode(crt_standard_next(alt_launcher_native_crt_mode()));
 		return 0;
-	case 2:
+	case 4:
 		return 1;
 	default:
 		return 2;
 	}
+}
+
+void kiosk_page_render(int menusub, uint64_t *menumask)
+{
+	OsdSetSize(16);
+	OsdSetTitle("Warning!!!", 0);
+	*menumask = 3;
+
+	int m = 0;
+	OsdWrite(m++, "");
+	OsdWrite(m++, "         Attention:");
+	OsdWrite(m++, " Kiosk mode locks the OSD.");
+	OsdWrite(m++, "");
+	OsdWrite(m++, " The menu cannot be opened");
+	OsdWrite(m++, " from a keyboard, gamepad");
+	OsdWrite(m++, " or the console buttons.");
+	OsdWrite(m++, "");
+	OsdWrite(m++, " To undo it you need a");
+	OsdWrite(m++, " Zaparoo card set up first,");
+	OsdWrite(m++, " or delete the settings file");
+	OsdWrite(m++, " from the SD card on a PC.");
+	OsdWrite(m++, "");
+	OsdWrite(m++, "  Do you want to continue?");
+	OsdWrite(m++, "            No", menusub == 0);
+	OsdWrite(m++, "            Yes", menusub == 1);
+}
+
+bool kiosk_page_confirm(int menusub)
+{
+	if (menusub != 1) return false;
+	// Closes the OSD itself: the input gates go live immediately, so an open
+	// OSD would be stranded with ESC already dead.
+	zaparoo_kiosk_set(true);
+	return true;
 }
 
 static int s_h, s_v, s_h0, s_v0;
