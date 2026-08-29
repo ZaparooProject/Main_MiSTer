@@ -1312,7 +1312,10 @@ void HandleUI(void)
 				if (cfg.video_off_logo) off_timeout = GetTimer(10000);
 			}
 
-			if (c || menustate != MENU_FILE_SELECT2)
+			// Kiosk never opens the menu, so its idle state is MENU_NONE2, not
+			// the file browser. Without this the countdown restarts every pass
+			// and the screen never dims or powers down.
+			if (c || menustate != (zaparoo_kiosk_active() ? MENU_NONE2 : MENU_FILE_SELECT2))
 			{
 				timeout = 0;
 				if (menu_visible <= 0)
@@ -1321,7 +1324,9 @@ void HandleUI(void)
 					c = 0;
 					menu_visible = 1;
 					video_menu_bg(user_io_status_get("[3:1]"));
-					OsdMenuCtl(1);
+					// OsdMenuCtl(1) turns the overlay on with whatever is in
+					// the OSD buffer; under kiosk that would flash the menu.
+					if (!zaparoo_kiosk_active()) OsdMenuCtl(1);
 					off_timeout = 0;
 				}
 			}
