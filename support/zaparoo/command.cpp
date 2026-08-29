@@ -8,6 +8,7 @@
 #include "kiosk.h"
 #include "mount.h"
 #include "save.h"
+#include "settings.h"
 
 // Tolerates trailing whitespace/CR: commands arrive from shell echoes.
 static bool tok_eq(const char *p, const char *tok)
@@ -35,7 +36,10 @@ bool zaparoo_command(const char *cmd)
 
 	if (!strncmp(cmd, "zaparoo_kiosk ", 14))
 	{
-		int state = parse_toggle(cmd + 14, zaparoo_kiosk_active());
+		// The setting, not the effective state: while the session bypass is up
+		// zaparoo_kiosk_active() is false, so toggle would try to re-enable
+		// something already enabled and do nothing.
+		int state = parse_toggle(cmd + 14, zaparoo_settings_kiosk_active());
 		if (state < 0) printf("zaparoo_command: bad argument: %s\n", cmd);
 		else zaparoo_kiosk_set(state != 0);
 		return true;

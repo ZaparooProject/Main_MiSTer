@@ -24,7 +24,9 @@ void frontend_page_render(int menusub, uint64_t *menumask)
 	// user quit the frontend this session.
 	sprintf(s, " Frontend:               %s", alt_launcher_enabled() ? " On" : "Off");
 	OsdWrite(m++, s, menusub == 0);
-	sprintf(s, " Kiosk mode:             %s", zaparoo_kiosk_active() ? " On" : "Off");
+	// The setting, not zaparoo_kiosk_active(): that is gated by the session
+	// bypass, which is exactly how this page gets reached while kiosk is on.
+	sprintf(s, " Kiosk mode:             %s", zaparoo_settings_kiosk_active() ? " On" : "Off");
 	OsdWrite(m++, s, menusub == 1);
 	sprintf(s, " Auto-save:              %s", zaparoo_settings_save_on_exit() ? " On" : "Off");
 	OsdWrite(m++, s, menusub == 2);
@@ -54,6 +56,13 @@ int frontend_page_select(int menusub)
 		alt_launcher_set_enabled(!alt_launcher_enabled());
 		return 0;
 	case 1:
+		// Reachable with kiosk already on via the bypass, so turning it off
+		// has to work here. Only turning it on needs the warning.
+		if (zaparoo_settings_kiosk_active())
+		{
+			zaparoo_kiosk_set(false);
+			return 0;
+		}
 		return 3;
 	case 2:
 		// Turning it off needs no confirmation; turning it on explains itself
