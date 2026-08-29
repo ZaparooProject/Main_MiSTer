@@ -7,17 +7,25 @@
 // the kiosk confirmation. Renderers write the OSD directly (the pages fit in
 // 16 rows); menu.cpp owns the state machine.
 
-// Rows: 0 Frontend, 1 Kiosk mode, 2 CRT mode, 3 Video standard (CRT on),
-// 4 Screen position (CRT on), 5 exit.
+// Rows: 0 Frontend, 1 Kiosk mode, 2 Auto-save, 3 CRT mode,
+// 4 Video standard (CRT on), 5 Screen position (CRT on), 6 exit.
 void frontend_page_render(int menusub, uint64_t *menumask);
 // Select on the highlighted row: 0 redraw, 1 enter Position, 2 leave the page,
-// 3 enter the kiosk confirmation.
+// 3 enter the kiosk confirmation, 4 enter the auto-save confirmation.
 int frontend_page_select(int menusub);
+// True for rows that open a sub-page, so Right enters them. Keeps menu.cpp
+// from carrying a row index that has to move whenever this page changes.
+bool frontend_page_row_has_submenu(int menusub);
 
 // Kiosk confirmation. Rows: 0 No, 1 Yes. Enabling kiosk closes the OSD, so the
 // caller must not keep rendering after confirm() returns true.
 void kiosk_page_render(int menusub, uint64_t *menumask);
 bool kiosk_page_confirm(int menusub);
+
+// Auto-save confirmation. Rows: 0 No, 1 Yes. Only guards turning it on: the
+// name promises protection against a power cut that it cannot give.
+void autosave_page_render(int menusub, uint64_t *menumask);
+bool autosave_page_confirm(int menusub);
 
 // Rows: 0 H offset, 1 V offset, 2 back. enter() snapshots the persisted trims
 // and, with no frontend running, publishes an alignment pattern; leave()

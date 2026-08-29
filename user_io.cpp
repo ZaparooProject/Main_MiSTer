@@ -3361,7 +3361,7 @@ void user_io_poll()
 			{
 				//printf("SD WR %llu on %d\n", lba, disk);
 
-				if (use_save) menu_process_save();
+				if (use_save) { menu_process_save(); zaparoo_save_note_write(); }
 
 				buffer_lba[disk] = -1;
 

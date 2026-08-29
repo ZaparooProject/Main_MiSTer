@@ -1,10 +1,13 @@
 #include "command.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "alt_launcher.h"
 #include "kiosk.h"
+#include "mount.h"
+#include "save.h"
 
 // Tolerates trailing whitespace/CR: commands arrive from shell echoes.
 static bool tok_eq(const char *p, const char *tok)
@@ -43,6 +46,61 @@ bool zaparoo_command(const char *cmd)
 		int state = parse_toggle(cmd + 17, alt_launcher_enabled());
 		if (state < 0) printf("zaparoo_command: bad argument: %s\n", cmd);
 		else alt_launcher_set_enabled(state != 0);
+		return true;
+	}
+
+	// Force the running core to write its save. The optional argument is a
+	// fixed hold in ms for characterising cores, not for normal use.
+	if (!strncmp(cmd, "zaparoo_save", 12) && (!cmd[12] || cmd[12] == ' ' || cmd[12] == '\t' || cmd[12] == '\r'))
+	{
+		const char *arg = cmd + 12;
+		while (*arg == ' ' || *arg == '\t') arg++;
+		unsigned hold = 0;
+		if (*arg && *arg != '\r')
+		{
+			char *end = 0;
+			long v = strtol(arg, &end, 10);
+			while (end && (*end == ' ' || *end == '\t' || *end == '\r')) end++;
+			if (!end || *end || v < 1 || v > 10000)
+			{
+				printf("zaparoo_command: bad argument: %s\n", cmd);
+				return true;
+			}
+			hold = (unsigned)v;
+		}
+		zaparoo_save_request(hold);
+		return true;
+	}
+
+	if (!strncmp(cmd, "zaparoo_pause ", 14))
+	{
+		int state = parse_toggle(cmd + 14, zaparoo_pause_active());
+		if (state < 0) printf("zaparoo_command: bad argument: %s\n", cmd);
+		else zaparoo_pause_set(state != 0);
+		return true;
+	}
+
+	// zaparoo_mount <pos> [path]. pos is the 1-based position of the slot in
+	// the core's own order, so a card works across cores. The rest of the line
+	// is the path, so names with spaces work; omitting it ejects.
+	if (!strncmp(cmd, "zaparoo_mount ", 14))
+	{
+		const char *arg = cmd + 14;
+		while (*arg == ' ' || *arg == '\t') arg++;
+		char *end = 0;
+		long pos = strtol(arg, &end, 10);
+		if (end == arg)
+		{
+			printf("zaparoo_command: bad argument: %s\n", cmd);
+			return true;
+		}
+		while (*end == ' ' || *end == '\t') end++;
+
+		char path[1024] = {};
+		snprintf(path, sizeof(path), "%s", end);
+		for (int i = (int)strlen(path) - 1; i >= 0 && (path[i] == '\r' || path[i] == ' ' || path[i] == '\t'); i--) path[i] = 0;
+
+		zaparoo_mount((int)pos, path);
 		return true;
 	}
 

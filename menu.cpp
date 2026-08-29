@@ -241,6 +241,8 @@ enum MENU
 	MENU_ZAPAROO_POSITION2,
 	MENU_ZAPAROO_KIOSK1,
 	MENU_ZAPAROO_KIOSK2,
+	MENU_ZAPAROO_AUTOSAVE1,
+	MENU_ZAPAROO_AUTOSAVE2,
 };
 
 static uint32_t menustate = MENU_NONE1;
@@ -7386,7 +7388,7 @@ void HandleUI(void)
 			menusub = 3;
 			break;
 		}
-		if (select || (right && menusub == 4))
+		if (select || (right && frontend_page_row_has_submenu(menusub)))
 		{
 			int act = frontend_page_select(menusub);
 			if (act == 1)
@@ -7402,6 +7404,11 @@ void HandleUI(void)
 			else if (act == 3)
 			{
 				menustate = MENU_ZAPAROO_KIOSK1;
+				menusub = 0;
+			}
+			else if (act == 4)
+			{
+				menustate = MENU_ZAPAROO_AUTOSAVE1;
 				menusub = 0;
 			}
 			else
@@ -7430,7 +7437,7 @@ void HandleUI(void)
 		{
 			position_page_leave();
 			menustate = MENU_ZAPAROO_FRONTEND1;
-			menusub = 4;
+			menusub = 5;
 			break;
 		}
 		if (left || right || plus || minus)
@@ -7466,6 +7473,27 @@ void HandleUI(void)
 			if (kiosk_page_confirm(menusub)) break;
 			menustate = MENU_ZAPAROO_FRONTEND1;
 			menusub = 1;
+		}
+		break;
+
+	case MENU_ZAPAROO_AUTOSAVE1:
+		if (!alt_launcher_installed())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		parentstate = menustate;
+		autosave_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_AUTOSAVE2;
+		break;
+
+	case MENU_ZAPAROO_AUTOSAVE2:
+		if (menu || back || select)
+		{
+			autosave_page_confirm(menusub);
+			menustate = MENU_ZAPAROO_FRONTEND1;
+			menusub = 2;
 		}
 		break;
 

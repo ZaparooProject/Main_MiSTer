@@ -430,6 +430,10 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 	// Tear down the launcher frontend (and its HPS framebuffer mmaps) before any
 	// FPGA reconfiguration. A live frontend scanning out /dev/fb0 over the f2sdram
 	// bridge deadlocks the AXI bus when do_bridge(0) resets it during load.
+	// Save-on-exit: the OsdDisable below is a falling edge and cannot trigger a
+	// save, so the flush has to happen before it, and before the frontend
+	// teardown blanks the screen behind the banner.
+	if (zaparoo_save_defer_core_load(name, cfg, xml)) return 0;
 	alt_launcher_shutdown();
 	OsdDisable();
 	static char path[1024];

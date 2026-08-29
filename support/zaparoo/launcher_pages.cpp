@@ -1,6 +1,7 @@
 #include "launcher_pages.h"
 #include "alt_launcher.h"
 #include "crt_settings.h"
+#include "settings.h"
 #include "osd.h"
 
 #include <stdio.h>
@@ -14,7 +15,7 @@ void frontend_page_render(int menusub, uint64_t *menumask)
 	OsdSetSize(16);
 	OsdSetTitle("Zaparoo", OSD_ARROW_LEFT);
 	bool crt = alt_launcher_native_crt_persisted();
-	*menumask = crt ? 0x3F : 0x27;
+	*menumask = crt ? 0x7F : 0x4F;
 
 	char s[64];
 	int m = 0;
@@ -25,17 +26,24 @@ void frontend_page_render(int menusub, uint64_t *menumask)
 	OsdWrite(m++, s, menusub == 0);
 	sprintf(s, " Kiosk mode:             %s", zaparoo_kiosk_active() ? " On" : "Off");
 	OsdWrite(m++, s, menusub == 1);
+	sprintf(s, " Auto-save:              %s", zaparoo_settings_save_on_exit() ? " On" : "Off");
+	OsdWrite(m++, s, menusub == 2);
 	OsdWrite(m++, "");
 	sprintf(s, " CRT mode:               %s", crt ? " On" : "Off");
-	OsdWrite(m++, s, menusub == 2);
+	OsdWrite(m++, s, menusub == 3);
 	if (crt)
 	{
 		sprintf(s, " Video standard:         %4s", crt_standard_name(alt_launcher_native_crt_mode()));
-		OsdWrite(m++, s, menusub == 3);
-		OsdWrite(m++, " Screen position           \x16", menusub == 4);
+		OsdWrite(m++, s, menusub == 4);
+		OsdWrite(m++, " Screen position           \x16", menusub == 5);
 	}
 	while (m < OsdGetSize() - 1) OsdWrite(m++, "");
-	OsdWrite(15, PAGE_STD_EXIT, menusub == 5);
+	OsdWrite(15, PAGE_STD_EXIT, menusub == 6);
+}
+
+bool frontend_page_row_has_submenu(int menusub)
+{
+	return menusub == 5;
 }
 
 int frontend_page_select(int menusub)
@@ -48,12 +56,21 @@ int frontend_page_select(int menusub)
 	case 1:
 		return 3;
 	case 2:
+		// Turning it off needs no confirmation; turning it on explains itself
+		// first, because the name promises more than it can deliver.
+		if (zaparoo_settings_save_on_exit())
+		{
+			zaparoo_settings_set_save_on_exit(false);
+			return 0;
+		}
+		return 4;
+	case 3:
 		alt_launcher_toggle_native_crt();
 		return 0;
-	case 3:
+	case 4:
 		alt_launcher_set_native_crt_mode(crt_standard_next(alt_launcher_native_crt_mode()));
 		return 0;
-	case 4:
+	case 5:
 		return 1;
 	default:
 		return 2;
@@ -83,6 +100,38 @@ void kiosk_page_render(int menusub, uint64_t *menumask)
 	OsdWrite(m++, "  Do you want to continue?");
 	OsdWrite(m++, "            No", menusub == 0);
 	OsdWrite(m++, "            Yes", menusub == 1);
+}
+
+void autosave_page_render(int menusub, uint64_t *menumask)
+{
+	OsdSetSize(16);
+	OsdSetTitle("Warning!!!", 0);
+	*menumask = 3;
+
+	int m = 0;
+	OsdWrite(m++, "");
+	OsdWrite(m++, "         Attention:");
+	OsdWrite(m++, " Auto-save runs when one");
+	OsdWrite(m++, " game exits and another");
+	OsdWrite(m++, " starts.");
+	OsdWrite(m++, "");
+	OsdWrite(m++, " Switching the MiSTer off");
+	OsdWrite(m++, " mid-game still loses the");
+	OsdWrite(m++, " save.");
+	OsdWrite(m++, "");
+	OsdWrite(m++, " Adds about half a second");
+	OsdWrite(m++, " when a game has a save.");
+	OsdWrite(m++, "");
+	OsdWrite(m++, "  Do you want to continue?");
+	OsdWrite(m++, "            No", menusub == 0);
+	OsdWrite(m++, "            Yes", menusub == 1);
+}
+
+bool autosave_page_confirm(int menusub)
+{
+	if (menusub != 1) return false;
+	zaparoo_settings_set_save_on_exit(true);
+	return true;
 }
 
 bool kiosk_page_confirm(int menusub)

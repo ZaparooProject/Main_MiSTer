@@ -6,6 +6,7 @@
 // kiosk predicate and the command dispatcher without a second include.
 #include "command.h"
 #include "kiosk.h"
+#include "save.h"
 
 #define ALT_LAUNCHER_MENUSUB     31
 

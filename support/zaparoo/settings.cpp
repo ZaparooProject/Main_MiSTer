@@ -9,6 +9,7 @@ static const char s_settings_file[] = "zaparoo_settings.bin";
 
 #define IDX_FRONTEND_DISABLED 0
 #define IDX_KIOSK             1
+#define IDX_SAVE_ON_EXIT      2
 
 static uint8_t s_blob[ZAPAROO_SETTINGS_SIZE];
 static bool s_loaded = false;
@@ -66,6 +67,16 @@ bool zaparoo_settings_kiosk_active(void)
 bool zaparoo_settings_set_kiosk(bool on)
 {
 	return settings_set(IDX_KIOSK, on ? 1 : 0);
+}
+
+bool zaparoo_settings_save_on_exit(void)
+{
+	return settings_blob()[IDX_SAVE_ON_EXIT] != 0;
+}
+
+bool zaparoo_settings_set_save_on_exit(bool on)
+{
+	return settings_set(IDX_SAVE_ON_EXIT, on ? 1 : 0);
 }
 
 void zaparoo_settings_invalidate(void)

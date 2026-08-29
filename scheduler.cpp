@@ -37,6 +37,7 @@ static void scheduler_co_poll(void)
 			frame_timer();
 			input_poll(0);
 			alt_launcher_poll();
+			zaparoo_poll();
 			video_poll();
 		}
 
