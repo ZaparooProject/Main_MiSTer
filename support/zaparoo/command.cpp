@@ -46,6 +46,22 @@ bool zaparoo_command(const char *cmd)
 		return true;
 	}
 
+	// Temporary peek at the OSD without unlocking the machine.
+	if (!strncmp(cmd, "zaparoo_osd ", 12))
+	{
+		const char *arg = cmd + 12;
+		while (*arg == ' ' || *arg == '\t') arg++;
+		if (tok_eq(arg, "open")) zaparoo_kiosk_osd_open();
+		else if (tok_eq(arg, "close")) zaparoo_kiosk_osd_close();
+		else if (tok_eq(arg, "toggle"))
+		{
+			if (zaparoo_kiosk_bypassed()) zaparoo_kiosk_osd_close();
+			else zaparoo_kiosk_osd_open();
+		}
+		else printf("zaparoo_command: bad argument: %s\n", cmd);
+		return true;
+	}
+
 	printf("zaparoo_command: unknown command: %s\n", cmd);
 	return false;
 }
