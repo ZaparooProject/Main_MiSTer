@@ -629,6 +629,10 @@ char *getappname()
 
 void app_restart(const char *path, const char *xml, const char *exe)
 {
+	// Zaparoo: exe may alias file_io's shared full_path buffer (user_io passes
+	// getFullPath(cfg.main)), which alt_launcher_shutdown() rewrites.
+	static char exe_copy[PATH_MAX];
+	if (exe) { snprintf(exe_copy, sizeof(exe_copy), "%s", exe); exe = exe_copy; }
 	alt_launcher_shutdown();
 	sync();
 	fpga_core_reset(1);
