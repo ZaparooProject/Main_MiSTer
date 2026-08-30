@@ -1062,6 +1062,12 @@ void alt_launcher_shutdown(void)
 			s_native_crt = false;
 			disable_native_crt_path();
 		}
+		// Mirror the live-child branch below. The HPS framebuffer can be on
+		// with no child alive (queued init, the respawn window, a crashed
+		// frontend), and FB_EN carried into do_bridge(0) is the AXI deadlock
+		// fpga_load_rbf's comment describes. Launcher core only: a game core
+		// never enabled it, and this also runs from app_restart there.
+		else if (is_menu()) video_fb_enable(0);
 		return;
 	}
 

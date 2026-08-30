@@ -3588,8 +3588,6 @@ static void video_fb_config()
 {
 	PROFILE_FUNCTION();
 
-	if (alt_launcher_handle_video_fb_config()) return;
-
 	int fb_scale = cfg.fb_size;
 
 	if (fb_scale <= 1)
@@ -3610,6 +3608,17 @@ static void video_fb_config()
 
 	brd_x = cfg.vscale_border / fb_scale_x;
 	brd_y = cfg.vscale_border / fb_scale_y;
+
+	// Zaparoo: while the launcher owns, or is queued to own, the HPS
+	// framebuffer, the geometry above is still recorded but the enable and
+	// the kernel-module write are left to the launcher, which re-asserts the
+	// frontend's own geometry instead. The hook used to sit at the top of
+	// this function, which left fb_width/fb_height at 0 for the whole menu
+	// process: video_menu_bg() built 0x0 wallpaper images, and the launch-time
+	// video_fb_enable(0) (menu-background fallback in video_fb_set) programmed
+	// a 0x0 framebuffer into the FPGA on the way into fpga_load_rbf. HDMI
+	// output died on every game launch from the frontend.
+	if (alt_launcher_handle_video_fb_config()) return;
 
 	if (fb_enabled) video_fb_enable(1, fb_num);
 
