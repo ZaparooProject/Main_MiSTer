@@ -59,6 +59,9 @@ echo "==> Copying new binary..."
 scp_cmd "$BINARY" "root@$MISTER_IP:$REMOTE_PATH"
 
 echo "==> Restarting MiSTer_Zaparoo..."
-ssh_cmd "killall MiSTer_Zaparoo 2>/dev/null || true; sync; nohup $REMOTE_PATH </dev/null >/dev/ttyS0 2>/dev/ttyS0 &"
+# setsid, not nohup: Main needs its own session, or it dies with the ssh one.
+ssh_cmd "killall MiSTer_Zaparoo 2>/dev/null || true; sync; sleep 1; cd /media/fat && setsid $REMOTE_PATH </dev/null >/dev/ttyS0 2>/dev/ttyS0 &"
+sleep 4
+ssh_cmd "pgrep -f MiSTer_Zaparoo >/dev/null" || { echo "error: MiSTer_Zaparoo did not come up" >&2; exit 1; }
 
 echo "==> Done."
