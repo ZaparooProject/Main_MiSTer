@@ -7,8 +7,9 @@
 // the kiosk confirmation. Renderers write the OSD directly (the pages fit in
 // 16 rows); menu.cpp owns the state machine.
 
-// Rows: 0 Frontend, 1 Kiosk mode, 2 Auto-save, 3 CRT mode,
-// 4 Video standard (CRT on), 5 Screen position (CRT on), 6 exit.
+// Rows: 0 Frontend, 1 Kiosk mode, 2 Auto-save, 3 Auto-run CDs,
+// 4 CRT mode, 5 Video standard (CRT on), 6 Screen position (CRT on),
+// 7 exit.
 void frontend_page_render(int menusub, uint64_t *menumask);
 // Select on the highlighted row: 0 redraw, 1 enter Position, 2 leave the page,
 // 3 enter the kiosk confirmation, 4 enter the auto-save confirmation.

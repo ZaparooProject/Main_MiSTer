@@ -15,7 +15,7 @@ void frontend_page_render(int menusub, uint64_t *menumask)
 	OsdSetSize(16);
 	OsdSetTitle("Zaparoo", OSD_ARROW_LEFT);
 	bool crt = alt_launcher_native_crt_persisted();
-	*menumask = crt ? 0x7F : 0x4F;
+	*menumask = crt ? 0xFF : 0x9F;
 
 	char s[64];
 	int m = 0;
@@ -30,22 +30,24 @@ void frontend_page_render(int menusub, uint64_t *menumask)
 	OsdWrite(m++, s, menusub == 1);
 	sprintf(s, " Auto-save:              %s", zaparoo_settings_save_on_exit() ? " On" : "Off");
 	OsdWrite(m++, s, menusub == 2);
+	sprintf(s, " Auto-run CDs:           %s", zaparoo_settings_cd_autorun() ? " On" : "Off");
+	OsdWrite(m++, s, menusub == 3);
 	OsdWrite(m++, "");
 	sprintf(s, " CRT mode:               %s", crt ? " On" : "Off");
-	OsdWrite(m++, s, menusub == 3);
+	OsdWrite(m++, s, menusub == 4);
 	if (crt)
 	{
 		sprintf(s, " Video standard:         %4s", crt_standard_name(alt_launcher_native_crt_mode()));
-		OsdWrite(m++, s, menusub == 4);
-		OsdWrite(m++, " Screen position           \x16", menusub == 5);
+		OsdWrite(m++, s, menusub == 5);
+		OsdWrite(m++, " Screen position           \x16", menusub == 6);
 	}
 	while (m < OsdGetSize() - 1) OsdWrite(m++, "");
-	OsdWrite(15, PAGE_STD_EXIT, menusub == 6);
+	OsdWrite(15, PAGE_STD_EXIT, menusub == 7);
 }
 
 bool frontend_page_row_has_submenu(int menusub)
 {
-	return menusub == 5;
+	return menusub == 6;
 }
 
 int frontend_page_select(int menusub)
@@ -74,12 +76,15 @@ int frontend_page_select(int menusub)
 		}
 		return 4;
 	case 3:
-		alt_launcher_toggle_native_crt();
+		zaparoo_settings_set_cd_autorun(!zaparoo_settings_cd_autorun());
 		return 0;
 	case 4:
-		alt_launcher_set_native_crt_mode(crt_standard_next(alt_launcher_native_crt_mode()));
+		alt_launcher_toggle_native_crt();
 		return 0;
 	case 5:
+		alt_launcher_set_native_crt_mode(crt_standard_next(alt_launcher_native_crt_mode()));
+		return 0;
+	case 6:
 		return 1;
 	default:
 		return 2;
