@@ -44,3 +44,5 @@ bool zaparoo_is_native_core(void);
 void zaparoo_alt_launcher_init_for_core(void);
 void zaparoo_alt_launcher_init_for_menu(void);
 void zaparoo_alt_launcher_start_for_menu(void);
+// Parks the menu core on its own background until a writer publishes frames.
+void zaparoo_native_video_release(void);

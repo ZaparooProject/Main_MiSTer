@@ -1573,6 +1573,7 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
+				zaparoo_native_video_release();
 				if (alt_launcher_configured())
 				{
 					if (rbf_path[0] || !zaparoo_is_native_core()) zaparoo_alt_launcher_init_for_menu();
