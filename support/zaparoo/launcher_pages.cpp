@@ -30,7 +30,7 @@ void frontend_page_render(int menusub, uint64_t *menumask)
 	OsdWrite(m++, s, menusub == 1);
 	sprintf(s, " Auto-save:              %s", zaparoo_settings_save_on_exit() ? " On" : "Off");
 	OsdWrite(m++, s, menusub == 2);
-	sprintf(s, " Auto-run CDs:           %s", zaparoo_settings_cd_autorun() ? " On" : "Off");
+	sprintf(s, " Auto-run discs:         %s", zaparoo_settings_cd_autorun() ? " On" : "Off");
 	OsdWrite(m++, s, menusub == 3);
 	OsdWrite(m++, "");
 	sprintf(s, " CRT mode:               %s", crt ? " On" : "Off");

@@ -1,8 +1,9 @@
 #include "physical_cd_autorun.h"
 
-// Disc signatures and raw-read fallbacks are adapted from
-// Anime0t4ku/Main_MiSTer_Physical_Disc.
+// Disc signatures, raw-read fallbacks and DVD media probing are adapted
+// from Anime0t4ku/Main_MiSTer_Physical_Disc.
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/cdrom.h>
@@ -15,9 +16,11 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "file_io.h"
+#include "fpga_io.h"
 #include "hardware.h"
 #include "menu.h"
 #include "settings.h"
@@ -44,6 +47,7 @@ typedef enum
 	CD_DISC_CDI,
 	CD_DISC_MDPLUS,
 	CD_DISC_SNES_MSU1,
+	CD_DISC_DVD,
 	CD_DISC_AUDIO,
 	CD_DISC_UNKNOWN,
 } cd_disc_type_t;
@@ -63,6 +67,13 @@ typedef struct
 	int first_data;
 } cd_toc_t;
 
+typedef enum
+{
+	DVD_CORE_NONE,
+	DVD_CORE_FPGA,
+	DVD_CORE_HYBRID,
+} dvd_core_kind_t;
+
 typedef struct
 {
 	bool present;
@@ -72,6 +83,8 @@ typedef struct
 	bool classified;
 	uint32_t fingerprint;
 	cd_disc_type_t type;
+	dvd_core_kind_t dvd_core;
+	char dvd_core_path[PATH_MAX];
 } cd_detection_t;
 
 typedef struct
@@ -115,6 +128,9 @@ static int s_retry_count = 0;
 static int s_absent_count = 0;
 static unsigned long s_poll_timer = 0;
 
+static dvd_core_kind_t resolve_dvd_core(char *path, size_t path_size,
+	unsigned int generation);
+
 static uint32_t read_le32(const uint8_t *p)
 {
 	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
@@ -125,6 +141,27 @@ static uint32_t hash_bytes(uint32_t hash, const uint8_t *data, size_t size)
 {
 	for (size_t i = 0; i < size; i++) hash = (hash ^ data[i]) * 16777619u;
 	return hash;
+}
+
+static bool dvd_media_fingerprint(int fd, uint32_t *fingerprint)
+{
+	dvd_struct info = {};
+	info.type = DVD_STRUCT_PHYSICAL;
+	info.physical.layer_num = 0;
+	if (ioctl(fd, DVD_READ_STRUCT, &info)) return false;
+
+	uint32_t hash = hash_bytes(2166136261u,
+		(const uint8_t *)&info, sizeof(info));
+	uint8_t sector[CD_USER_SECTOR_SIZE];
+	const int probe_lbas[] = {16, 256};
+	for (size_t i = 0; i < sizeof(probe_lbas) / sizeof(probe_lbas[0]); i++)
+	{
+		ssize_t count = pread(fd, sector, sizeof(sector),
+			(off_t)probe_lbas[i] * sizeof(sector));
+		if (count == sizeof(sector)) hash = hash_bytes(hash, sector, sizeof(sector));
+	}
+	*fingerprint = hash ? hash : 1;
+	return true;
 }
 
 static bool detection_current(unsigned int generation)
@@ -552,6 +589,17 @@ static cd_detection_t detect_disc(unsigned int generation,
 	}
 	result.media_changed = handled_fingerprint && media_changed > 0;
 
+	if (dvd_media_fingerprint(fd, &result.fingerprint))
+	{
+		result.readable = true;
+		result.classified = true;
+		result.type = CD_DISC_DVD;
+		close(fd);
+		result.dvd_core = resolve_dvd_core(result.dvd_core_path,
+			sizeof(result.dvd_core_path), generation);
+		return result;
+	}
+
 	cd_toc_t toc;
 	if (!read_toc(fd, &toc))
 	{
@@ -700,6 +748,89 @@ static bool resolve_disc_launcher(cd_disc_type_t type, char *path,
 	return false;
 }
 
+typedef struct
+{
+	char fpga[PATH_MAX];
+	char hybrid[PATH_MAX];
+	unsigned int fpga_date;
+} dvd_core_paths_t;
+
+static unsigned int dated_dvd_core(const char *name)
+{
+	if (strlen(name) != 16 || strncmp(name, "DVD_", 4) ||
+		strcasecmp(name + 12, ".rbf")) return 0;
+
+	unsigned int date = 0;
+	for (int i = 4; i < 12; i++)
+	{
+		if (name[i] < '0' || name[i] > '9') return 0;
+		date = date * 10 + (unsigned int)(name[i] - '0');
+	}
+	return date;
+}
+
+static void find_dvd_cores(const char *dir_path, dvd_core_paths_t *cores,
+	unsigned int generation)
+{
+	if (!detection_current(generation)) return;
+	DIR *dir = opendir(dir_path);
+	if (!dir) return;
+
+	struct dirent *entry;
+	while (detection_current(generation) && (entry = readdir(dir)))
+	{
+		if (entry->d_name[0] == '.') continue;
+
+		char path[PATH_MAX];
+		int length = snprintf(path, sizeof(path), "%s/%s", dir_path, entry->d_name);
+		if (length < 0 || length >= (int)sizeof(path)) continue;
+
+		bool is_dir = entry->d_type == DT_DIR;
+		if (entry->d_type == DT_UNKNOWN)
+		{
+			struct stat st;
+			is_dir = !stat(path, &st) && S_ISDIR(st.st_mode);
+		}
+		if (is_dir)
+		{
+			if (entry->d_name[0] == '_') find_dvd_cores(path, cores, generation);
+			continue;
+		}
+
+		if (!strcasecmp(entry->d_name, "DVD_Player.rbf"))
+		{
+			if (!cores->hybrid[0]) snprintf(cores->hybrid, sizeof(cores->hybrid), "%s", path);
+			continue;
+		}
+
+		unsigned int date = dated_dvd_core(entry->d_name);
+		if (date > cores->fpga_date)
+		{
+			cores->fpga_date = date;
+			snprintf(cores->fpga, sizeof(cores->fpga), "%s", path);
+		}
+	}
+	closedir(dir);
+}
+
+static dvd_core_kind_t resolve_dvd_core(char *path, size_t path_size,
+	unsigned int generation)
+{
+	dvd_core_paths_t cores = {};
+	find_dvd_cores(getRootDir(), &cores, generation);
+	if (cores.fpga[0])
+	{
+		snprintf(path, path_size, "%s", cores.fpga);
+		return DVD_CORE_FPGA;
+	}
+	if (cores.hybrid[0])
+	{
+		snprintf(path, path_size, "%s", cores.hybrid);
+		return DVD_CORE_HYBRID;
+	}
+	return DVD_CORE_NONE;
+}
+
 static const char *disc_type_name(cd_disc_type_t type)
 {
 	switch (type)
@@ -713,6 +844,7 @@ static const char *disc_type_name(cd_disc_type_t type)
 	case CD_DISC_CDI: return "CD-i";
 	case CD_DISC_MDPLUS: return "MD+";
 	case CD_DISC_SNES_MSU1: return "SNES MSU-1";
+	case CD_DISC_DVD: return "DVD";
 	case CD_DISC_AUDIO: return "Audio CD";
 	default: return "unknown CD";
 	}
@@ -743,7 +875,7 @@ static bool consume_detection(const cd_detection_t *result)
 				result->fingerprint : CD_UNREADABLE_FINGERPRINT;
 			save_handled_fingerprint(fingerprint);
 			s_retry_count = 0;
-			printf("CD autorun: disc could not be identified; waiting for media change\n");
+			printf("Disc autorun: disc could not be identified; waiting for media change\n");
 			return false;
 		}
 
@@ -758,8 +890,32 @@ static bool consume_detection(const cd_detection_t *result)
 	if (result->type == CD_DISC_AUDIO || result->type == CD_DISC_UNKNOWN)
 	{
 		save_handled_fingerprint(result->fingerprint);
-		printf("CD autorun: ignoring %s\n", disc_type_name(result->type));
+		printf("Disc autorun: ignoring %s\n", disc_type_name(result->type));
 		return false;
+	}
+
+	if (result->type == CD_DISC_DVD)
+	{
+		if (result->dvd_core == DVD_CORE_NONE)
+		{
+			save_handled_fingerprint(result->fingerprint);
+			printf("Disc autorun: DVD detected but no supported DVD core was found\n");
+			Info("DVD core not found", 5000);
+			return false;
+		}
+		if (!save_handled_fingerprint(result->fingerprint))
+		{
+			printf("Disc autorun: unable to write %s\n", PHYSICAL_DISC_HANDLED_FILE);
+			Info("Disc autorun state could not be saved", 5000);
+			return true;
+		}
+
+		const char *core_name = result->dvd_core == DVD_CORE_FPGA ?
+			"FPGA DVD" : "Hybrid DVD Player";
+		printf("Disc autorun: detected DVD, launching %s: %s\n",
+			core_name, result->dvd_core_path);
+		fpga_load_rbf(result->dvd_core_path);
+		return true;
 	}
 
 	char path[512];
@@ -771,13 +927,13 @@ static bool consume_detection(const cd_detection_t *result)
 		save_handled_fingerprint(result->fingerprint);
 		if (!provider_installed)
 		{
-			printf("CD autorun: no physical CD provider installed for %s\n",
+			printf("Disc autorun: no physical CD provider installed for %s\n",
 				disc_type_name(result->type));
 			Info("No physical CD provider installed", 5000);
 		}
 		else
 		{
-			printf("CD autorun: installed provider has no launcher for %s\n",
+			printf("Disc autorun: installed provider has no launcher for %s\n",
 				disc_type_name(result->type));
 			Info("Physical CD launcher not found", 5000);
 		}
@@ -786,12 +942,12 @@ static bool consume_detection(const cd_detection_t *result)
 
 	if (!save_handled_fingerprint(result->fingerprint))
 	{
-		printf("CD autorun: unable to write %s\n", PHYSICAL_DISC_HANDLED_FILE);
-		Info("CD autorun state could not be saved", 5000);
+		printf("Disc autorun: unable to write %s\n", PHYSICAL_DISC_HANDLED_FILE);
+		Info("Disc autorun state could not be saved", 5000);
 		return true;
 	}
 
-	printf("CD autorun: detected %s, launching %s provider: %s\n",
+	printf("Disc autorun: detected %s, launching %s provider: %s\n",
 		disc_type_name(result->type), provider_name, path);
 	xml_load(path);
 	return true;
