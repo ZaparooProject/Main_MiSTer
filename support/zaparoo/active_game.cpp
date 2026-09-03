@@ -33,6 +33,8 @@ void zaparoo_active_game_set_file(const char *dir, const char *path, int recent_
 {
 	if (!path || !path[0]) return;
 	if (recent_idx < 0 && !isXmlName(path)) return;
+	// Slot 15 is menu.cpp's video preset slot (MENU_PRESET_FILE_SELECTED).
+	if (recent_idx == 15) return;
 	if (path[0] == '/')
 	{
 		active_game_write(path);
