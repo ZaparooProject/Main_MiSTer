@@ -25,7 +25,7 @@
 #define ZSAVE_MAX_HOLD_MS   2500
 #define ZSAVE_REPORT_MS     1200
 
-enum zsave_state { ZSAVE_IDLE, ZSAVE_ARMED, ZSAVE_HOLD, ZSAVE_REPORT };
+enum zsave_state { ZSAVE_IDLE, ZSAVE_ARMED, ZSAVE_HOLD, ZSAVE_REPORT, ZSAVE_ARCADE_ONLY };
 
 static zsave_state s_state = ZSAVE_IDLE;
 static unsigned long s_min_deadline = 0;
@@ -303,10 +303,14 @@ bool zaparoo_save_request(void)
 	{
 		// The OSD is open, so OSD_STATUS is already high and the core's dump
 		// happened when it opened. Only the arcade half is left, and lowering
-		// the signal here would close the user's menu.
-		s_arcade_saved = false;
-		arcade_poll_flush();
+		// the signal here would close the user's menu. The extraction that
+		// the open started can still be running, so poll for the flag across
+		// the usual arcade floor rather than reading it once.
 		printf("zaparoo_save: OSD already open, arcade NVRAM only\n");
+		if (!is_arcade()) return true;
+		s_arcade_saved = false;
+		s_hold_cap = GetTimer(ZSAVE_ARCADE_MIN_MS);
+		s_state = ZSAVE_ARCADE_ONLY;
 		return true;
 	}
 
@@ -362,6 +366,7 @@ void zaparoo_poll(void)
 				// The user opened the real OSD over us; it owns the signal now,
 				// so do not lower it. A held-back core load still has to happen.
 				printf("zaparoo_save: OSD opened during save, releasing\n");
+				autosave_override_end();
 				if (s_deferred_load)
 				{
 					reissue_load();
@@ -388,6 +393,25 @@ void zaparoo_poll(void)
 		if (!CheckTimer(s_report_deadline)) break;
 		printf("zaparoo_save: done (writes during hold=%d, after release=%d)\n",
 		            s_writes_hold, s_writes_after);
+		// A load deferred into the report window is still waiting.
+		if (s_deferred_load)
+		{
+			reissue_load();
+			break;
+		}
+		s_state = ZSAVE_IDLE;
+		break;
+
+	case ZSAVE_ARCADE_ONLY:
+		// The user's OSD owns OSD_STATUS: nothing is raised, lowered or painted.
+		arcade_poll_flush();
+		if (!s_arcade_saved && !CheckTimer(s_hold_cap)) break;
+		printf("zaparoo_save: arcade poll done (saved=%d)\n", s_arcade_saved);
+		if (s_deferred_load)
+		{
+			reissue_load();
+			break;
+		}
 		s_state = ZSAVE_IDLE;
 		break;
 

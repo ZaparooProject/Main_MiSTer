@@ -6,6 +6,28 @@
 #include "spi.h"
 #include "user_io.h"
 
+// substrcpy() has no destination bound and a config item can run to 2 KB, so
+// every field copied out of one here goes through this instead. Same field
+// semantics: returns the length copied, 0 for an empty or missing field.
+static int substrcpy_n(char *d, size_t size, const char *s, char idx)
+{
+	char p = 0;
+	size_t n = 0;
+	if (!size) return 0;
+	while (*s)
+	{
+		if (p == idx)
+		{
+			if (*s == ',') break;
+			if (n < size - 1) d[n++] = *s;
+		}
+		else if (*s == ',') p++;
+		s++;
+	}
+	d[n] = 0;
+	return (int)n;
+}
+
 // Steps over the prefixes menu.cpp strips before looking at a row's type, and
 // optionally resolves them the way menu.cpp does. Pass hdmask 0 when only the
 // pointer advance is wanted: the flag results are then meaningless but the
@@ -91,7 +113,7 @@ bool zaparoo_confstr_autosave(char *opt, int opt_size, int *ex, uint32_t *on_val
 		if (p[0] != 'O' && p[0] != 'o') continue;
 
 		char label[64] = {};
-		substrcpy(label, p, 1);
+		substrcpy_n(label, sizeof(label), p, 1);
 		// Console cores call it plain "Autosave"; arcade cores qualify it
 		// ("Autosave NVRAM" on CAVE, "Autosave Hiscores" on the shared nvram.v
 		// cores), and those ship Off, which is what stops a forced save cold.
@@ -103,7 +125,7 @@ bool zaparoo_confstr_autosave(char *opt, int opt_size, int *ex, uint32_t *on_val
 		for (int v = 0; v < 16; v++)
 		{
 			char val[64] = {};
-			if (!substrcpy(val, p, 2 + v) || !val[0]) break;
+			if (!substrcpy_n(val, sizeof(val), p, 2 + v) || !val[0]) break;
 			if (strcasecmp(val, "On")) continue;
 
 			snprintf(opt, opt_size, "%s", p + 1);
@@ -146,7 +168,7 @@ bool zaparoo_confstr_save_row(char *opt, int opt_size, int *ex, bool *usable)
 		if (p[0] != 'R' && p[0] != 'r' && p[0] != 'T' && p[0] != 't') continue;
 
 		char label[64] = {};
-		substrcpy(label, p, 1);
+		substrcpy_n(label, sizeof(label), p, 1);
 		if (!is_save_row_label(label)) continue;
 
 		snprintf(opt, opt_size, "%s", p + 1);
@@ -169,16 +191,17 @@ bool zaparoo_confstr_slot(int pos, int *core_slot,
 	if (ext && ext_size)
 	{
 		char tmp[256] = {};
-		substrcpy(tmp, p, 1);
-		while (strlen(tmp) % 3) strcat(tmp, " ");
-		if ((int)strlen(tmp) >= ext_size) return false;
+		size_t len = substrcpy_n(tmp, sizeof(tmp), p, 1);
+		while (len % 3 && len < sizeof(tmp) - 1) tmp[len++] = ' ';
+		tmp[len] = 0;
+		if ((int)len >= ext_size) return false;
 		strcpy(ext, tmp);
 	}
 
 	if (label && label_size)
 	{
 		char tmp[256] = {};
-		substrcpy(tmp, p, 2);
+		substrcpy_n(tmp, sizeof(tmp), p, 2);
 		snprintf(label, label_size, "%s", tmp);
 	}
 

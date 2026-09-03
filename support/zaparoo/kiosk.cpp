@@ -23,17 +23,24 @@ bool zaparoo_kiosk_bypassed(void)
 	return s_bypass;
 }
 
-void zaparoo_kiosk_set(bool on)
+bool zaparoo_kiosk_set(bool on)
 {
-	if (zaparoo_settings_kiosk_active() == on) return;
-	if (!zaparoo_settings_set_kiosk(on)) return;
+	if (zaparoo_settings_kiosk_active() == on)
+	{
+		// Already on but bypassed for a look: "on" means make it bite again.
+		if (on) zaparoo_kiosk_osd_close();
+		return true;
+	}
+	if (!zaparoo_settings_set_kiosk(on)) return false;
 	printf("zaparoo_kiosk: %s\n", on ? "on" : "off");
 
 	s_bypass = false;
+	s_key_at = 0;
 
 	// The menu background is not kiosk's business: whatever the user picked
 	// (snow, wallpaper, a test pattern) stays as it is.
 	if (on && menu_present()) MenuHide();
+	return true;
 }
 
 void zaparoo_kiosk_osd_open(void)

@@ -139,8 +139,7 @@ void autosave_page_render(int menusub, uint64_t *menumask)
 bool autosave_page_confirm(int menusub)
 {
 	if (menusub != 1) return false;
-	zaparoo_settings_set_save_on_exit(true);
-	return true;
+	return zaparoo_settings_set_save_on_exit(true);
 }
 
 bool kiosk_page_confirm(int menusub)
@@ -148,8 +147,7 @@ bool kiosk_page_confirm(int menusub)
 	if (menusub != 1) return false;
 	// Closes the OSD itself: the input gates go live immediately, so an open
 	// OSD would be stranded with ESC already dead.
-	zaparoo_kiosk_set(true);
-	return true;
+	return zaparoo_kiosk_set(true);
 }
 
 static int s_h, s_v, s_h0, s_v0;
