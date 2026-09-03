@@ -7489,7 +7489,13 @@ void HandleUI(void)
 		break;
 
 	case MENU_ZAPAROO_AUTOSAVE2:
-		if (menu || back || select)
+		if (menu || back)
+		{
+			menustate = MENU_ZAPAROO_FRONTEND1;
+			menusub = 2;
+			break;
+		}
+		if (select)
 		{
 			autosave_page_confirm(menusub);
 			menustate = MENU_ZAPAROO_FRONTEND1;

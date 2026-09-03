@@ -18,13 +18,16 @@ int frontend_page_select(int menusub);
 // from carrying a row index that has to move whenever this page changes.
 bool frontend_page_row_has_submenu(int menusub);
 
-// Kiosk confirmation. Rows: 0 No, 1 Yes. Enabling kiosk closes the OSD, so the
-// caller must not keep rendering after confirm() returns true.
+// Kiosk confirmation. Rows: 0 No, 1 Yes. confirm() returns true only when
+// kiosk was switched on and persisted; that closes the OSD, so the caller must
+// not keep rendering after a true return. False (No, or the settings file
+// could not be written) leaves everything as it was.
 void kiosk_page_render(int menusub, uint64_t *menumask);
 bool kiosk_page_confirm(int menusub);
 
 // Auto-save confirmation. Rows: 0 No, 1 Yes. Only guards turning it on: the
-// name promises protection against a power cut that it cannot give.
+// name promises protection against a power cut that it cannot give. confirm()
+// returns true only when the setting was persisted.
 void autosave_page_render(int menusub, uint64_t *menumask);
 bool autosave_page_confirm(int menusub);
 
