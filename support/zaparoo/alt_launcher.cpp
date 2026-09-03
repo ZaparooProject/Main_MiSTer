@@ -390,6 +390,14 @@ static void zero_native_crt_words(void)
 	shmem_unmap(p, map_size);
 }
 
+// The menu core's native video reader activates on any non-zero control word
+// at 0x3A000000 and that core no longer clears DDR on startup, so a previous
+// core's leftovers make it scan out garbage instead of its noise background.
+void zaparoo_native_video_release(void)
+{
+	zero_native_crt_words();
+}
+
 static void clear_launcher_tty(void)
 {
 	int tty_fd = open(s_tty_path, O_WRONLY | O_CLOEXEC);
@@ -1187,6 +1195,9 @@ void alt_launcher_poll(void)
 void alt_launcher_shutdown(void)
 {
 	fflush(stdout);
+	// Every FPGA reconfiguration passes through here, so the incoming core
+	// cannot inherit a stale native video control block.
+	zero_native_crt_words();
 	if (!s_pid)
 	{
 		// installed(): orphans from a previous Main hold fb0/tty7 regardless
