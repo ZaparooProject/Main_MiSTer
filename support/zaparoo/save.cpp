@@ -37,6 +37,10 @@ static int s_writes_after = 0;
 static bool s_deferred_load = false;
 static bool s_reissuing = false;
 static bool s_direct = false;
+// The user's OSD was open when the flush was armed, and whether this flush
+// raised OSD_STATUS itself. Only a flush that owns the signal may lower it.
+static bool s_osd_open = false;
+static bool s_owns_signal = false;
 static bool s_arcade_saved = false;
 static bool s_arcade_can_request = false;
 static char s_autosave_opt[128];
@@ -171,6 +175,7 @@ static void enter_hold(void)
 {
 	s_arcade_saved = false;
 	s_arcade_can_request = false;
+	s_owns_signal = false;
 	s_direct = direct_save();
 
 	// A core can ask Main for a save if it has an explicit row to pulse or an
@@ -187,9 +192,26 @@ static void enter_hold(void)
 
 	if (!s_direct)
 	{
-		paint_banner("Saving...");
-		autosave_override_begin();
-		raise_signal();
+		if (s_osd_open && !s_deferred_load && !is_arcade())
+		{
+			// No row to pulse, and the signal belongs to the user's menu.
+			printf("zaparoo_save: OSD open and no usable save row, nothing to do\n");
+			s_state = ZSAVE_IDLE;
+			return;
+		}
+		if (!s_osd_open || s_deferred_load)
+		{
+			// A deferred load is about to replace the core, so closing the
+			// user's menu costs nothing: drop the signal first to get the
+			// rising edge the fallback needs. Two SPI frames apart is
+			// thousands of core clocks, plenty for its edge detector.
+			if (s_osd_open) lower_signal();
+			paint_banner("Saving...");
+			autosave_override_begin();
+			raise_signal();
+			s_owns_signal = true;
+		}
+		// Otherwise arcade with the user's OSD open: poll the flag only.
 	}
 
 	s_writes_hold = 0;
@@ -223,31 +245,26 @@ static void enter_report(bool release)
 {
 	arcade_blind_flush();
 
-	// The direct path never raised the signal or touched the Autosave option,
-	// so there is nothing to unwind.
+	// Only a flush that raised the signal has anything to lower; the Autosave
+	// restore is a no-op unless the override ran.
 	if (s_deferred_load)
 	{
 		// No point reporting "Saved" a frame before the FPGA is reconfigured.
-		if (release && !s_direct) lower_signal();
-		if (!s_direct) autosave_override_end();
+		if (release && s_owns_signal) lower_signal();
+		autosave_override_end();
 		reissue_load();
 		return;
 	}
 
 	if (release)
 	{
-		if (!s_direct)
-		{
-			// Lower first so the dump finishes with autosave still on.
-			lower_signal();
-			autosave_override_end();
-		}
+		// Lower first so the dump finishes with autosave still on.
+		if (s_owns_signal) lower_signal();
+		autosave_override_end();
+		// A no-op while the user's menu is open, which is the intent.
 		Info("Saved", ZSAVE_REPORT_MS);
 	}
-	else if (!s_direct)
-	{
-		autosave_override_end();
-	}
+	else autosave_override_end();
 
 	s_writes_after = 0;
 	s_report_deadline = GetTimer(ZSAVE_REPORT_MS);
@@ -270,6 +287,10 @@ bool zaparoo_save_defer_core_load(const char *rbf, const char *cfg, const char *
 	// change, so an inspection-based gate skips it silently. Guessing wrong
 	// loses data, so when the user has opted in, always flush. The cost is the
 	// half second the confirmation page warns about.
+	// menu.cpp's reboot rows call fpga_load_rbf on every pass while the hold
+	// runs, so a repeat of the same target is adopted silently.
+	bool same = s_deferred_load && !strcmp(s_rbf, rbf) &&
+	            !strcmp(s_cfg, cfg ? cfg : "") && !strcmp(s_xml, xml ? xml : "");
 	snprintf(s_rbf, sizeof(s_rbf), "%s", rbf);
 	snprintf(s_cfg, sizeof(s_cfg), "%s", cfg ? cfg : "");
 	snprintf(s_xml, sizeof(s_xml), "%s", xml ? xml : "");
@@ -278,12 +299,13 @@ bool zaparoo_save_defer_core_load(const char *rbf, const char *cfg, const char *
 	// A save already running just adopts the new target when it reports.
 	if (s_state == ZSAVE_IDLE)
 	{
+		s_osd_open = menu_present();
 		s_writes_hold = 0;
 		s_writes_after = 0;
 		s_state = ZSAVE_ARMED;
 	}
 
-	printf("zaparoo_save: holding core load for a flush\n");
+	if (!same) printf("zaparoo_save: holding core load for a flush\n");
 	return true;
 }
 
@@ -299,16 +321,10 @@ bool zaparoo_save_request(void)
 		printf("zaparoo_save: already in progress\n");
 		return false;
 	}
-	if (menu_present())
-	{
-		// The OSD is open, so OSD_STATUS is already high and the core's dump
-		// happened when it opened. Only the arcade half is left, and lowering
-		// the signal here would close the user's menu.
-		s_arcade_saved = false;
-		arcade_poll_flush();
-		printf("zaparoo_save: OSD already open, arcade NVRAM only\n");
-		return true;
-	}
+	// With the user's OSD open the signal is theirs: the direct row can still
+	// be pulsed and the arcade flag polled, but nothing is raised or lowered.
+	s_osd_open = menu_present();
+	if (s_osd_open) printf("zaparoo_save: OSD already open, not taking the signal\n");
 
 	s_writes_hold = 0;
 	s_writes_after = 0;
@@ -345,9 +361,9 @@ void zaparoo_poll(void)
 		break;
 
 	case ZSAVE_HOLD:
-		// Both bail-outs are about ownership of OSD_STATUS, which the direct
-		// path never takes, so they only apply to the fallback.
-		if (!s_direct)
+		// Both bail-outs are about ownership of OSD_STATUS, so they only
+		// apply when this flush raised it.
+		if (s_owns_signal)
 		{
 			// Signal lost first: Info()/InfoMessage() from elsewhere send a
 			// command with OSD_INFO or OSD_MSG set, which drives OSD_STATUS low.
@@ -357,11 +373,14 @@ void zaparoo_poll(void)
 				enter_report(false);
 				break;
 			}
-			if (menu_present())
+			// Not a bail-out when the flush deliberately took the signal from
+			// a menu that was already open.
+			if (!s_osd_open && menu_present())
 			{
 				// The user opened the real OSD over us; it owns the signal now,
 				// so do not lower it. A held-back core load still has to happen.
 				printf("zaparoo_save: OSD opened during save, releasing\n");
+				autosave_override_end();
 				if (s_deferred_load)
 				{
 					reissue_load();
@@ -388,6 +407,12 @@ void zaparoo_poll(void)
 		if (!CheckTimer(s_report_deadline)) break;
 		printf("zaparoo_save: done (writes during hold=%d, after release=%d)\n",
 		            s_writes_hold, s_writes_after);
+		// A load deferred into the report window is still waiting.
+		if (s_deferred_load)
+		{
+			reissue_load();
+			break;
+		}
 		s_state = ZSAVE_IDLE;
 		break;
 
