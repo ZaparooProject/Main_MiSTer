@@ -28,11 +28,12 @@
 #include "menu.h"
 #include "scheduler.h"
 #include "shmem.h"
+#include "smbus.h"
 #include "user_io.h"
 #include "video.h"
 
 // video_reinit() is intentionally internal to upstream's video module. The
-// launcher uses it only for a bounded startup retry after video_init().
+// launcher uses it only to re-read EDID during a bounded startup window.
 extern void video_reinit();
 
 static const char s_launcher_path[] = "zaparoo/frontend";
@@ -141,6 +142,11 @@ static unsigned long s_native_fb_mode_timer = 0;
 static unsigned long s_hdmi_fb_reassert_timer = 0;
 static int s_hdmi_fb_reasserts_remaining = 0;
 static unsigned long s_hdmi_edid_retry_timer = 0;
+static unsigned long s_hdmi_edid_hold_deadline = 0;
+static unsigned long s_hdmi_edid_watch_deadline = 0;
+static bool s_hdmi_edid_retried = false;
+static bool s_hdmi_link_was_down = false;
+static int s_hdmi_edid_attempts = 0;
 static unsigned long s_tty_deadline = 0;
 static unsigned long s_native_crt_finish_timer = 0;
 static bool s_gave_up = false;
@@ -171,6 +177,67 @@ static void publish_console_state(const char *state, const char *nonce);
 // A child alive this long is treated as stable: its exit does not count
 // toward the crash-loop give-up limit.
 #define ALT_LAUNCHER_STABLE_MS 10000
+
+// A display powering up alongside the DE10 can assert HPD well after
+// video_init() has already fallen back to the default mode. Hold the child
+// back for this long waiting for the real EDID, then keep watching for this
+// long after it has spawned.
+#define ALT_LAUNCHER_EDID_HOLD_MS 3000
+#define ALT_LAUNCHER_EDID_WATCH_MS 30000
+#define ALT_LAUNCHER_EDID_POLL_MS 250
+#define ALT_LAUNCHER_EDID_WATCH_POLL_MS 500
+#define ALT_LAUNCHER_EDID_MAX_REINIT 3
+
+static void restart_launcher(bool crt);
+
+// ADV7513 register 0x42: bit 6 HPD, bit 5 monitor sense. Both high is
+// upstream's own "safe to read EDID" condition (video_poll()). A private
+// i2c handle keeps this out of video.cpp; hdmi_cec.cpp opens the same chip
+// the same way.
+// Returns -1 when the transmitter is absent or unreadable, else 0/1.
+static int hdmi_link_state(void)
+{
+	static int fd = -2;
+	if (fd == -2) fd = i2c_open(0x39, 0);
+	if (fd < 0) return -1;
+	int status = i2c_smbus_read_byte_data(fd, 0x42);
+	if (status < 0) return -1;
+	return ((status & 0x60) == 0x60) ? 1 : 0;
+}
+
+// The MENU core exposes no HDMI interrupt pin ("Hotplug and CEC won't be
+// available"), so upstream's video_poll() hot-plug re-init never runs: a sink
+// that shows up late is never noticed and the fallback mode sticks until the
+// next core load. Poll the sense bits instead and spend a video_reinit() only
+// on the down->up edge - it reprograms the PLL, so a display that simply has
+// no EDID at all must not be made to flicker for it.
+// Returns true once a valid EDID has been read.
+static bool edid_link_tick(void)
+{
+	int link = hdmi_link_state();
+	if (!link)
+	{
+		s_hdmi_link_was_down = true;
+		return false;
+	}
+	if (link < 0 || !s_hdmi_link_was_down) return false;
+	// The sink can raise HPD a moment before its DDC answers, so the edge is
+	// worth a couple of goes - but never more, or a display that has no EDID
+	// to give is flickered for the whole window.
+	if (s_hdmi_edid_attempts >= ALT_LAUNCHER_EDID_MAX_REINIT)
+	{
+		s_hdmi_link_was_down = false;
+		return false;
+	}
+
+	s_hdmi_edid_attempts++;
+	unsigned long t0 = GetTimer(0);
+	video_reinit();
+	zlog("edid: link came up, video_reinit took %lu ms, edid=%d", GetTimer(0) - t0, video_get_edid(NULL, NULL));
+	if (!video_get_edid(NULL, NULL)) return false;
+	s_hdmi_link_was_down = false;
+	return true;
+}
 
 static unsigned long s_fb_watchdog_timer = 0;
 
@@ -319,6 +386,14 @@ static void zero_native_crt_words(void)
 	shmem_unmap(p, map_size);
 }
 
+// The menu core's native video reader activates on any non-zero control word
+// at 0x3A000000 and that core no longer clears DDR on startup, so a previous
+// core's leftovers make it scan out garbage instead of its noise background.
+void zaparoo_native_video_release(void)
+{
+	zero_native_crt_words();
+}
+
 static void clear_launcher_tty(void)
 {
 	int tty_fd = open(s_tty_path, O_WRONLY | O_CLOEXEC);
@@ -440,6 +515,8 @@ static void return_to_normal_mode(bool escaped)
 	s_hdmi_fb_reassert_timer = 0;
 	s_hdmi_fb_reasserts_remaining = 0;
 	s_hdmi_edid_retry_timer = 0;
+	s_hdmi_edid_hold_deadline = 0;
+	s_hdmi_edid_watch_deadline = 0;
 	s_crash_count = 0;
 	s_gave_up = true;
 	s_escaped = escaped;
@@ -454,6 +531,8 @@ static void reset_launcher_state(void)
 	s_hdmi_fb_reassert_timer = 0;
 	s_hdmi_fb_reasserts_remaining = 0;
 	s_hdmi_edid_retry_timer = 0;
+	s_hdmi_edid_hold_deadline = 0;
+	s_hdmi_edid_watch_deadline = 0;
 	s_native_crt_finish_timer = 0;
 	s_fb_watchdog_timer = 0;
 	s_crash_count = 0;
@@ -726,7 +805,7 @@ bool alt_launcher_console_lease_active(void)
 
 bool alt_launcher_scheduler_sleep_enabled(void)
 {
-	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer || s_native_fb_mode_timer || s_hdmi_fb_reassert_timer || s_hdmi_edid_retry_timer;
+	return s_pid || s_init_pending || s_respawn_timer || s_tty_deadline || s_native_crt_finish_timer || s_native_fb_mode_timer || s_hdmi_fb_reassert_timer || s_hdmi_edid_retry_timer || s_hdmi_edid_watch_deadline;
 }
 
 bool alt_launcher_handle_video_fb_config(void)
@@ -755,10 +834,16 @@ void alt_launcher_init(bool native_crt)
 	s_native_crt = native_crt;
 	// user_io can request the launcher before video_init() has read EDID and
 	// selected the HDMI mode. Defer the child until that setup returns. If the
-	// first EDID read missed a slow monitor, allow one bounded retry after the
-	// link has had another 500 ms to settle.
+	// first EDID read missed a slow monitor, retry after the link has had
+	// another 500 ms to settle, then poll out the rest of the hold window.
 	s_hdmi_edid_retry_timer = native_crt ? 0 : GetTimer(500);
 	if (!native_crt && !s_hdmi_edid_retry_timer) s_hdmi_edid_retry_timer = 1;
+	s_hdmi_edid_hold_deadline = native_crt ? 0 : GetTimer(ALT_LAUNCHER_EDID_HOLD_MS);
+	if (!native_crt && !s_hdmi_edid_hold_deadline) s_hdmi_edid_hold_deadline = 1;
+	s_hdmi_edid_watch_deadline = 0;
+	s_hdmi_edid_retried = false;
+	s_hdmi_link_was_down = false;
+	s_hdmi_edid_attempts = 0;
 	s_init_pending = true;
 	s_pending_logged = false;
 	zlog("init queued: native_crt=%d edid=%d fb_state=%d", native_crt, video_get_edid(NULL, NULL), video_fb_state());
@@ -948,6 +1033,7 @@ void alt_launcher_poll(void)
 			s_tty_deadline = 0;
 			s_hdmi_fb_reassert_timer = 0;
 			s_hdmi_fb_reasserts_remaining = 0;
+			s_hdmi_edid_watch_deadline = 0;
 			user_io_osd_key_enable(1);
 			bool exited = WIFEXITED(status);
 			int exit_status = exited ? WEXITSTATUS(status) : 0;
@@ -991,6 +1077,32 @@ void alt_launcher_poll(void)
 			return;
 		}
 
+		// The child was spawned against the fallback video mode. Once the
+		// display finally answers, re-init and restart it so its startup
+		// probe runs against the real mode - nothing else would notice
+		// until the next core load.
+		if (!s_native_crt && s_hdmi_edid_watch_deadline && !s_console_lease)
+		{
+			if (video_get_edid(NULL, NULL) || CheckTimer(s_hdmi_edid_watch_deadline))
+			{
+				zlog("edid watch: done, edid=%d", video_get_edid(NULL, NULL));
+				s_hdmi_edid_watch_deadline = 0;
+			}
+			else if (CheckTimer(s_hdmi_edid_retry_timer))
+			{
+				s_hdmi_edid_retry_timer = GetTimer(ALT_LAUNCHER_EDID_WATCH_POLL_MS);
+				if (!s_hdmi_edid_retry_timer) s_hdmi_edid_retry_timer = 1;
+				if (edid_link_tick())
+				{
+					zlog("edid watch: display answered, restarting the frontend");
+					s_hdmi_edid_watch_deadline = 0;
+					s_hdmi_edid_retry_timer = 0;
+					restart_launcher(s_native_crt);
+					return;
+				}
+			}
+		}
+
 		// Nothing legitimately turns the HPS framebuffer off under a live
 		// HDMI frontend, but an HDMI hot-plug re-init (video_reinit ->
 		// video_menu_bg) does exactly that. Re-assert so the frontend's
@@ -1026,11 +1138,43 @@ void alt_launcher_poll(void)
 		if (!s_native_crt && video_get_edid(NULL, NULL) == 0)
 		{
 			if (s_hdmi_edid_retry_timer && !CheckTimer(s_hdmi_edid_retry_timer)) return;
-			unsigned long t0 = GetTimer(0);
-			video_reinit();
-			zlog("edid retry: video_reinit took %lu ms, edid=%d", GetTimer(0) - t0, video_get_edid(NULL, NULL));
+			s_hdmi_edid_retry_timer = 0;
+
+			if (!s_hdmi_edid_retried)
+			{
+				// One unconditional re-read: video_init() can have run while
+				// the transmitter was still fetching its first EDID.
+				s_hdmi_edid_retried = true;
+				unsigned long t0 = GetTimer(0);
+				video_reinit();
+				zlog("edid retry: video_reinit took %lu ms, edid=%d", GetTimer(0) - t0, video_get_edid(NULL, NULL));
+			}
+			else edid_link_tick();
+
+			// Spawning against the fallback mode is what leaves the frontend
+			// rendering at the wrong size, so keep the child back while the
+			// hold window is open.
+			if (video_get_edid(NULL, NULL) == 0 && !CheckTimer(s_hdmi_edid_hold_deadline))
+			{
+				s_hdmi_edid_retry_timer = GetTimer(ALT_LAUNCHER_EDID_POLL_MS);
+				if (!s_hdmi_edid_retry_timer) s_hdmi_edid_retry_timer = 1;
+				return;
+			}
 		}
 		s_hdmi_edid_retry_timer = 0;
+		s_hdmi_edid_hold_deadline = 0;
+		// Still nothing: spawn anyway rather than sit on a black screen, and
+		// keep watching for the sink behind the running child.
+		s_hdmi_edid_watch_deadline = 0;
+		if (!s_native_crt && video_get_edid(NULL, NULL) == 0 && hdmi_link_state() >= 0)
+		{
+			s_hdmi_edid_watch_deadline = GetTimer(ALT_LAUNCHER_EDID_WATCH_MS);
+			if (!s_hdmi_edid_watch_deadline) s_hdmi_edid_watch_deadline = 1;
+			// Fresh budget: attempts spent during the hold must not leave the
+			// watch unable to act when the display finally turns up.
+			s_hdmi_edid_attempts = 0;
+			zlog("edid: spawning on the fallback video mode, watching for the display");
+		}
 		s_init_pending = false;
 		spawn();
 		return;
@@ -1047,6 +1191,9 @@ void alt_launcher_poll(void)
 void alt_launcher_shutdown(void)
 {
 	fflush(stdout);
+	// Every FPGA reconfiguration passes through here, so the incoming core
+	// cannot inherit a stale native video control block.
+	zero_native_crt_words();
 	if (!s_pid)
 	{
 		// installed(): orphans from a previous Main hold fb0/tty7 regardless
@@ -1058,6 +1205,11 @@ void alt_launcher_shutdown(void)
 			s_native_crt = false;
 			disable_native_crt_path();
 		}
+		// No video_fb_enable(0) here. app_restart() calls this a second time,
+		// after fpga_load_rbf has already put the game core in the FPGA, and
+		// is_menu() is a per-process cache of orig_name, so it is still true:
+		// video_fb_set()'s menu-background fallback would flip the disable
+		// into FB_EN at menu geometry and write it into the new core.
 		return;
 	}
 
@@ -1128,6 +1280,9 @@ static void stop_launcher(bool restore_bg)
 	if (restore_bg && is_menu()) video_menu_bg(user_io_status_get("[3:1]"));
 	s_respawn_timer = 0;
 	s_tty_deadline = 0;
+	s_hdmi_edid_retry_timer = 0;
+	s_hdmi_edid_hold_deadline = 0;
+	s_hdmi_edid_watch_deadline = 0;
 	s_init_pending = false;
 	s_crash_count = 0;
 	// Clear an earlier give-up or escape: an explicit action leaves a clean

@@ -206,7 +206,12 @@ void get_ctrl_index_maps(int dev_fd, char *guid, uint16_t *btn_map, uint16_t *ab
   	printf("Gamecontrollerdb: mapping buttons for %s ", guid);
 	if (ioctl(dev_fd, EVIOCGBIT(EV_KEY, sizeof(keybits)), keybits) >= 0)
 	{
-		for (int i = BTN_JOYSTICK; i < KEY_MAX; i++)
+		// Zaparoo: btn_map has KEY_MAX - BTN_JOYSTICK slots at both call sites,
+		// but the two loops append every key bit the node advertises. A
+		// composite dongle (keyboard plus consumer control in one node) can
+		// exceed that and run into the abs_map that sits next to it.
+		const uint16_t btn_max = KEY_MAX - BTN_JOYSTICK;
+		for (int i = BTN_JOYSTICK; i < KEY_MAX && btn_cnt < btn_max; i++)
 		{
 				if (test_bit(i, keybits))
 				{
@@ -215,7 +220,7 @@ void get_ctrl_index_maps(int dev_fd, char *guid, uint16_t *btn_map, uint16_t *ab
 					btn_cnt++;
 				}
 		}
-		for (int i = 0; i < BTN_JOYSTICK; i++)
+		for (int i = 0; i < BTN_JOYSTICK && btn_cnt < btn_max; i++)
 		{
 				if (test_bit(i, keybits))
 				{
@@ -517,6 +522,9 @@ static int gcdb_controller_idx(uint16_t bustype, uint16_t vid, uint16_t pid, uin
 {
 	for (int i=0; i < MAX_GCDB_ENTRIES; i++)
 	{
+		// Zaparoo: db_maps is zero-initialised, so an unused slot would match a
+		// device reporting no vid/pid and hand it an all-zero map as a hit.
+		if (!db_maps[i].id[1] && !db_maps[i].id[2]) continue;
 		if (db_maps[i].id[0] == bustype && db_maps[i].id[1] == vid && db_maps[i].id[2] == pid && db_maps[i].id[3] == version)
 		{
 			return i;
