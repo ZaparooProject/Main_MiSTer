@@ -51,11 +51,7 @@ static void zlog(const char *fmt, ...)
 
 void alt_launcher_cfg_apply(void)
 {
-	// Override any user ini values: this fork is single-purpose. recents and
-	// log_file_entry back Zaparoo's own integration points (/tmp/STARTPATH,
-	// /tmp/OSD_VISIBLE, the gameid log).
-	cfg.recents = 1;
-	cfg.log_file_entry = 1;
+	// The frontend requires direct framebuffer access regardless of MiSTer.ini.
 	cfg.fb_terminal = 1;
 }
 
