@@ -2112,7 +2112,7 @@ static void uinp_check_key()
 {
 	if (uinp_fd > 0)
 	{
-		if (!grabbed)
+		if (!grabbed && !user_io_osd_is_visible())
 		{
 			if (uinp_ev.value && CheckTimer(uinp_repeat))
 			{
@@ -3020,7 +3020,10 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 		{
 			if (!load_map(get_map_name(dev, 1), &input[dev].mmap, sizeof(input[dev].mmap)))
 			{
-				if (!gcdb_map_for_controller(input[sub_dev].bustype, input[sub_dev].vid, input[sub_dev].pid, input[sub_dev].gcdb_version, pool[sub_dev].fd, input[dev].mmap))
+				// Zaparoo: probe the gamepad node of a merged DualSense, never its
+				// touchpad (see zaparoo_gcdb_probe_dev in launcher_input_detect.inc).
+				int probe = zaparoo_gcdb_probe_dev(dev, sub_dev);
+				if (!gcdb_map_for_controller(input[probe].bustype, input[probe].vid, input[probe].pid, input[probe].gcdb_version, pool[probe].fd, input[dev].mmap))
 				{
 					memset(input[dev].mmap, 0, sizeof(input[dev].mmap));
 					memcpy(input[dev].mmap, def_mmap, sizeof(def_mmap));
@@ -5588,6 +5591,7 @@ int input_test(int getchar)
 				setup_deadzone(&ev, i);
 			}
 			unflag_players();
+			if (alt_launcher_configured()) zaparoo_prewarm_device_maps(n);
 		}
 		cur_leds |= 0x80;
 		state++;
@@ -5624,7 +5628,7 @@ int input_test(int getchar)
 	if (state == 2)
 	{
 		int timeout = 0;
-		if (is_menu() && video_fb_state()) timeout = 25;
+		if (is_menu() && (video_fb_state() || alt_launcher_active())) timeout = 25;
 
 		while (1)
 		{
@@ -6263,7 +6267,8 @@ int input_test(int getchar)
 					if (cmd[len - 1] == '\n') cmd[len - 1] = 0;
 					cmd[len] = 0;
 					printf("MiSTer_cmd: %s\n", cmd);
-					if (!strncmp(cmd, "fb_cmd", 6)) video_cmd(cmd);
+					if (!strncmp(cmd, "zaparoo_", 8)) zaparoo_command(cmd);
+					else if (!strncmp(cmd, "fb_cmd", 6)) video_cmd(cmd);
 					else if (!strncmp(cmd, "video_mode ", 11)) video_mode_cmd(cmd + 11);
 					else if (!strncmp(cmd, "load_core ", 10))
 					{
@@ -6305,6 +6310,10 @@ int input_test(int getchar)
 					if (sysled_is_enabled || video_fb_state()) DISKLED_ON;
 				}
 				lseek(pool[NUMDEV + 2].fd, 0, SEEK_SET);
+				// Zaparoo: an LED-only wakeup (SD activity blinks the mmc trigger at kHz
+				// rates) must not keep draining, or the idle timeout never fires and the
+				// UI cothread starves.
+				if (return_value == 1) break;
 			}
 		}
 

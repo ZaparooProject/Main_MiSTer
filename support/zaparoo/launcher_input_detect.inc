@@ -109,3 +109,49 @@ void input_export_launcher_metadata(void)
 {
 	zaparoo_export_metadata(NULL);
 }
+
+// Node to hand gcdb_map_for_controller() when input_cb loads a merged device's
+// map. gcdb resolves a mapping's `bN` entries by enumerating the probed node's
+// EV_KEY bits (get_ctrl_index_maps), while `hN.x` hat entries are arithmetic.
+// Probed through a DualSense Touchpad node, every face button resolves to a
+// touchpad code and the d-pad still works: exactly "d-pad moves, buttons dead"
+// from beta testing, and the result is cached by vid/pid, so one wrong probe
+// poisons every later rescan. Prefer the group's gamepad node.
+static int zaparoo_gcdb_probe_dev(int dev, int sub_dev)
+{
+	if (input[sub_dev].quirk != QUIRK_DS4TOUCH) return sub_dev;
+	for (int i = 0; i < NUMDEV; i++)
+	{
+		if (i != sub_dev && pool[i].fd >= 0 && input[i].bind == dev && input[i].quirk == QUIRK_DS4) return i;
+	}
+	return sub_dev;
+}
+
+// input_cb loads a device's maps on its first event: config/inputs lookups plus
+// both gamecontrollerdb files, ~300 ms cold on exFAT. Every /dev/input rescan
+// wipes that state, so the first press after boot or a hotplug paid it. Run the
+// same loads at open time instead by feeding input_cb a centred, unmapped axis
+// event, which is otherwise inert (it stops at the axis_pos compare). Menu core
+// only: the boot scan runs before the frontend is spawned, and game cores keep
+// stock behaviour.
+static void zaparoo_prewarm_device_maps(int n)
+{
+	if (mapping || !is_menu()) return;
+	for (int i = 0; i < n; i++)
+	{
+		if (pool[i].fd < 0 || input[i].mouse || input[i].force_joy) continue;
+		// Only the merge base of a multi-node device (input[].bind, set by
+		// mergedevs() before this runs). A DualSense contributes a gamepad and
+		// a Touchpad node with the same Phys/Uniq; whichever node reaches
+		// input_cb first is the one gcdb probes for the shared map, and the
+		// touchpad is the wrong answer (see zaparoo_gcdb_probe_dev).
+		if (input[i].bind != i || input[i].quirk == QUIRK_DS4TOUCH) continue;
+		struct input_event ev = {};
+		ev.type = EV_ABS;
+		ev.code = ABS_MISC;
+		struct input_absinfo ai = {};
+		ai.minimum = -1;
+		ai.maximum = 1;
+		input_cb(&ev, &ai, i);
+	}
+}

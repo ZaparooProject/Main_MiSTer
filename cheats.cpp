@@ -463,3 +463,29 @@ int cheats_loaded()
 {
 	return loaded;
 }
+
+// Accessors for support/zaparoo/cheat.cpp, which drives cheats from
+// /dev/MiSTer_cmd. Read-only apart from the selection setter, which exists so
+// an external command can borrow cheats_toggle() and put the cursor back.
+const char *cheats_get_name(int idx)
+{
+	if (idx < 0 || idx >= cheats_available()) return NULL;
+	return cheats[idx].name;
+}
+
+bool cheats_get_enabled(int idx)
+{
+	if (idx < 0 || idx >= cheats_available()) return false;
+	return cheats[idx].enabled;
+}
+
+int cheats_get_selected()
+{
+	return iSelectedEntry;
+}
+
+void cheats_set_selected(int idx)
+{
+	if (idx < 0 || idx >= cheats_available()) return;
+	iSelectedEntry = idx;
+}

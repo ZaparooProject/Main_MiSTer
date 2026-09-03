@@ -18,7 +18,9 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
                                     int *reboot_req,
                                     long *sysinfo_timer)
 {
-	if (!alt_launcher_configured()) return 0;
+	// installed(), not configured(): this layout carries the only route to the
+	// Zaparoo page, which is where the frontend gets re-enabled.
+	if (!alt_launcher_installed()) return 0;
 
 	char s[256];
 	int m = 0;
@@ -60,11 +62,7 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
 	OsdWrite(m++, " Remap keyboard            \x16", menusub == 0);
 	OsdWrite(m++, " Define joystick buttons   \x16", menusub == 1);
 	OsdWrite(m++, " Scripts                   \x16", menusub == 2);
-	// Same persisted bit the frontend's Settings toggle writes
-	// (zaparoo_launcher_crt.bin byte 0); selecting it respawns the
-	// frontend under the new mode immediately.
-	sprintf(s, " CRT mode:               %s", alt_launcher_native_crt_persisted() ? " On" : "Off");
-	OsdWrite(m++, s, menusub == 3);
+	OsdWrite(m++, " Zaparoo                   \x16", menusub == 3);
 
 	OsdWrite(m++, "");
 	int cr = m;
@@ -80,20 +78,16 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
 
 int alt_launcher_translate_system_select(int menusub)
 {
-	if (!alt_launcher_configured()) return menusub;
+	// Must track alt_launcher_render_system_menu(): rendering the trimmed
+	// layout while dispatching through the upstream map desyncs the rows.
+	if (!alt_launcher_installed()) return menusub;
 
-	// 3 is the CRT mode toggle, which has no upstream dispatch case:
-	// perform the toggle here and return -1 so MENU_SYSTEM2 redraws the
-	// menu (the respawn then drops the OSD via spawn()'s MenuHide).
-	if (menusub == 3)
-	{
-		alt_launcher_toggle_native_crt();
-		return -1;
-	}
+	// 3 is the Zaparoo page link (no upstream dispatch case).
+	if (menusub == 3) return -2;
 
 	// Maps trimmed-menu menusub to upstream MENU_SYSTEM2 dispatch index:
 	// 0 Remap -> 1, 1 Define joy -> 2, 2 Scripts -> 3, 4 Reboot -> 5,
-	// 5 Exit -> 6 (3, CRT mode, is handled above).
+	// 5 Exit -> 6.
 	static const int map[] = { 1, 2, 3, -1, 5, 6 };
 	if (menusub < 0 || menusub >= (int)(sizeof(map) / sizeof(map[0]))) return -1;
 	return map[menusub];
@@ -101,5 +95,5 @@ int alt_launcher_translate_system_select(int menusub)
 
 bool alt_launcher_system_holding_reboot(int menusub)
 {
-	return alt_launcher_configured() && menusub == 4;
+	return alt_launcher_installed() && menusub == 4;
 }

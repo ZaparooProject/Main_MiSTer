@@ -30,6 +30,7 @@
 
 #include "support.h"
 #include "support/arcade/mra_loader.h"
+#include "support/zaparoo/alt_launcher.h"
 #include "lib/imlib2/Imlib2.h"
 #include "lib/md5/md5.h"
 
@@ -2799,8 +2800,8 @@ void video_poll()
 				hdmi_need_init = 1;
 				if (hdmi_power)
 				{
-					printf("[HDMI] HPD and Monitor Sense Stable. Power up, re-initializing...\n");
-					video_hdmi_power(1);
+				printf("[HDMI] HPD and Monitor Sense Stable. Power up, re-initializing...\n");
+				video_hdmi_power(1);
 				}
 				else
 				{
@@ -3156,7 +3157,7 @@ static uint64_t calc_frame_locked_phase(uint64_t fsc_num, uint64_t fsc_den,
 		fsc_den * 100000000ULL
 	);
 
-	// Calculate round(frame_cycles * 2^40 / frame_clocks).
+	// Calculate round(frame_cycles * 2^40 / frame_clocks). 
 	// The whole-number quotient contributes only
 	// multiples of 2^40, which disappear under the 40-bit mask.
 	const uint64_t frame_remainder = frame_cycles % frame_clocks;
@@ -3471,7 +3472,7 @@ static void fb_write_module_params()
 	});
 }
 
-void video_fb_enable(int enable, int n)
+static void video_fb_set(int enable, int n, int update_module)
 {
 	PROFILE_FUNCTION();
 
@@ -3513,7 +3514,7 @@ void video_fb_enable(int enable, int n)
 				//printf("Linux frame buffer: %dx%d, stride = %d bytes\n", fb_width, fb_height, fb_width * 4);
 				if (!fb_num)
 				{
-					fb_write_module_params();
+					if (update_module) fb_write_module_params();
 					input_switch(0);
 				}
 				else
@@ -3539,6 +3540,36 @@ void video_fb_enable(int enable, int n)
 		DisableIO();
 		if (cfg.direct_video) set_vga_fb(enable);
 		if (is_menu()) user_io_status_set("[8:5]", (fb_enabled && !fb_num) ? 0x160 : 0);
+	}
+}
+
+void video_fb_enable(int enable, int n)
+{
+	video_fb_set(enable, n, 1);
+}
+
+void video_fb_reassert()
+{
+	int fmt, rb, width, height, stride;
+	FILE *fp = fopen("/sys/module/MiSTer_fb/parameters/mode", "rt");
+	int fields = fp ? fscanf(fp, "%d %d %d %d %d", &fmt, &rb, &width, &height, &stride) : 0;
+	if (fp) fclose(fp);
+
+	if (fields == 5 && fmt == 8888 && rb == 1 && width > 0 && height > 0 && stride == width * 4)
+	{
+		// vmode may resize the launcher's live buffer after video_fb_config().
+		// Re-assert the kernel module's current RGB32 geometry, not stale menu geometry.
+		int configured_width = fb_width;
+		int configured_height = fb_height;
+		fb_width = width;
+		fb_height = height;
+		video_fb_set(1, 0, 0);
+		fb_width = configured_width;
+		fb_height = configured_height;
+	}
+	else
+	{
+		video_fb_set(1, 0, 0);
 	}
 }
 
@@ -3577,6 +3608,17 @@ static void video_fb_config()
 
 	brd_x = cfg.vscale_border / fb_scale_x;
 	brd_y = cfg.vscale_border / fb_scale_y;
+
+	// Zaparoo: while the launcher owns, or is queued to own, the HPS
+	// framebuffer, the geometry above is still recorded but the enable and
+	// the kernel-module write are left to the launcher, which re-asserts the
+	// frontend's own geometry instead. The hook used to sit at the top of
+	// this function, which left fb_width/fb_height at 0 for the whole menu
+	// process: video_menu_bg() built 0x0 wallpaper images, and the launch-time
+	// video_fb_enable(0) (menu-background fallback in video_fb_set) programmed
+	// a 0x0 framebuffer into the FPGA on the way into fpga_load_rbf. HDMI
+	// output died on every game launch from the frontend.
+	if (alt_launcher_handle_video_fb_config()) return;
 
 	if (fb_enabled) video_fb_enable(1, fb_num);
 
@@ -4187,8 +4229,12 @@ void video_cmd(char *cmd)
 		{
 			if (div >= 1 && div <= 4)
 			{
+				// Pixel repetition doubles the physical output width while hact
+				// remains the logical source width. Apply the matching extra
+				// vertical divisor so the framebuffer keeps the output aspect.
+				int vdiv = div * (v_cur.param.pr ? 2 : 1);
 				width = v_cur.item[1] / div;
-				height = v_cur.item[5] / div;
+				height = v_cur.item[5] / vdiv;
 				hmin = vmin = 0;
 				hmax = v_cur.item[1] - 1;
 				vmax = v_cur.item[5] - 1;
@@ -4200,8 +4246,9 @@ void video_cmd(char *cmd)
 		{
 			if (div >= 1 && div <= 4)
 			{
+				int vdiv = div * (v_cur.param.pr ? 2 : 1);
 				width = v_cur.item[1] / div;
-				height = v_cur.item[5] / div;
+				height = v_cur.item[5] / vdiv;
 				hmin = vmin = 0;
 				hmax = v_cur.item[1] - 1;
 				vmax = v_cur.item[5] - 1;

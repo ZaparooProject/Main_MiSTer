@@ -11,6 +11,7 @@
 #include "profiling.h"
 #include "video.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/physical_cd_autorun.h"
 
 static cothread_t co_scheduler = nullptr;
 static cothread_t co_poll = nullptr;
@@ -37,6 +38,8 @@ static void scheduler_co_poll(void)
 			frame_timer();
 			input_poll(0);
 			alt_launcher_poll();
+			zaparoo_poll();
+			physical_cd_autorun_poll();
 			video_poll();
 		}
 

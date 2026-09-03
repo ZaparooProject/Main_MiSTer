@@ -42,6 +42,7 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "support.h"
+#include "support/zaparoo/active_game.h"
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/menu_rbf.h"
 
@@ -1469,7 +1470,7 @@ void user_io_init(const char *path, const char *xml)
 	user_io_read_confstr();
 	user_io_read_core_name();
 
-	if ((fpga_get_buttons() & BUTTON_OSD) && is_menu())
+	if ((fpga_get_buttons() & BUTTON_OSD) && is_menu() && !zaparoo_kiosk_active())
 	{
 		altcfg(0);
 		SelectINI();
@@ -1494,9 +1495,10 @@ void user_io_init(const char *path, const char *xml)
 		app_restart(path, xml, main);
 	}
 
-	// Zaparoo: u-boot/stock binary may have loaded the system menu.rbf before we got here.
-	// Force a reload of our hardcoded menu RBF if we booted without an explicit RBF path.
-	if (is_menu() && !rbf_path[0] && !zaparoo_is_native_core()) fpga_load_rbf(menu_rbf_name());
+	// Zaparoo: u-boot or another Main binary may hand us an already-loaded system menu.rbf.
+	// Replace it when the path is empty or explicitly names the stock menu, but not after
+	// fpga_load_rbf() restarts us with the custom menu path.
+	if (is_menu() && (!rbf_path[0] || is_stock_menu_rbf(rbf_path)) && !zaparoo_is_native_core()) fpga_load_rbf(menu_rbf_name());
 	else if (is_menu() && !rbf_path[0] && zaparoo_is_native_core()) zaparoo_alt_launcher_start_for_menu();
 
 	uint8_t hotswap[4] = {};
@@ -1516,6 +1518,7 @@ void user_io_init(const char *path, const char *xml)
 	}
 
 	if (cfg.log_file_entry) MakeFile("/tmp/STARTPATH", core_path);
+	zaparoo_active_game_set_core(core_path);
 
 	if (cfg.bootcore[0] != '\0')
 	{
@@ -1573,6 +1576,7 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
+				zaparoo_native_video_release();
 				if (alt_launcher_configured())
 				{
 					if (rbf_path[0] || !zaparoo_is_native_core()) zaparoo_alt_launcher_init_for_menu();
@@ -3327,6 +3331,7 @@ void user_io_poll()
 				blks = 1;
 			}
 			DisableIO();
+			if (op == 2) zaparoo_save_note_write();
 			if ( sd_type[disk] == SD_TYPE_A2)
 			{
 				//if (op) printf("A2 %x %llu on %d\n", op,lba, disk);
@@ -4301,7 +4306,7 @@ void user_io_kbd(uint16_t key, int press)
 			// either keyboard or joypad MENU button. Input grabbing flips
 			// automatically when the OSD opens (user_io_osd_key_enable ->
 			// input_switch -> EVIOCGRAB).
-			bool is_menu_event = ((has_menu() || osd_is_visible || (get_key_mod() & (LALT | RALT | RGUI | LGUI))) && (((key == KEY_F12) && (!is_f12_mod_needed() || (get_key_mod() & (RGUI | LGUI)))) || key == KEY_MENU));
+			bool is_menu_event = !alt_launcher_console_lease_active() && ((has_menu() || osd_is_visible || (get_key_mod() & (LALT | RALT | RGUI | LGUI))) && (((key == KEY_F12) && (!is_f12_mod_needed() || (get_key_mod() & (RGUI | LGUI)))) || key == KEY_MENU));
 			if (!press)
 			{
 				if (is_menu() && !video_fb_state()) printf("PS2 code(break)%s for core: %d(0x%X)\n", (code & EXT) ? "(ext)" : "", code & 255, code & 255);

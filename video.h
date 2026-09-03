@@ -65,6 +65,7 @@ void  video_mode_adjust(bool force = false);
 int   hasAPI1_5();
 
 void video_fb_enable(int enable, int n = 0);
+void video_fb_reassert();
 int video_fb_state();
 void video_menu_bg(int n, int idle = 0);
 int video_bg_has_picture();
