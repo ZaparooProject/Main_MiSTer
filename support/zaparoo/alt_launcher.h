@@ -2,6 +2,12 @@
 
 #include <stdint.h>
 
+// Pulled in here so upstream files already including alt_launcher.h reach the
+// kiosk predicate and the command dispatcher without a second include.
+#include "command.h"
+#include "kiosk.h"
+#include "save.h"
+
 #define ALT_LAUNCHER_MENUSUB     31
 
 void alt_launcher_init(bool native_crt);
@@ -16,7 +22,19 @@ bool alt_launcher_active(void);
 // until the child exits: the OSD must not auto-open over that window.
 bool alt_launcher_owns_screen(void);
 bool alt_launcher_console_lease_active(void);
+// The frontend should run and own the screen: installed, enabled, not escaped.
 bool alt_launcher_configured(void);
+// The binary exists on disk. Ignores the enable setting and the escape flag,
+// so OSD surfaces that can re-enable the frontend gate on this, never on
+// alt_launcher_configured().
+bool alt_launcher_installed(void);
+// The persisted enable setting alone. Unlike alt_launcher_configured() it does
+// not go false after a clean frontend exit, so menu rows read from it.
+bool alt_launcher_enabled(void);
+// Persists the enable setting and applies it live: tears a running frontend
+// down on disable, spawns one on enable when the launcher core is up.
+void alt_launcher_set_enabled(bool enabled);
+void alt_launcher_installed_refresh(void);
 // Returns the persisted native CRT enable state used by launcher restarts.
 bool alt_launcher_native_crt_persisted(void);
 // Flips the persisted native CRT state and respawns the launcher to apply it.

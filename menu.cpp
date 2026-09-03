@@ -239,6 +239,10 @@ enum MENU
 	MENU_ZAPAROO_FRONTEND2,
 	MENU_ZAPAROO_POSITION1,
 	MENU_ZAPAROO_POSITION2,
+	MENU_ZAPAROO_KIOSK1,
+	MENU_ZAPAROO_KIOSK2,
+	MENU_ZAPAROO_AUTOSAVE1,
+	MENU_ZAPAROO_AUTOSAVE2,
 };
 
 static uint32_t menustate = MENU_NONE1;
@@ -622,7 +626,9 @@ static uint32_t menu_key_get(void)
 	}
 
 	// currently no key pressed
-	if (!c && !select_ini)
+	// Kiosk: the 3s hold below sets menustate directly, bypassing the key
+	// decode gate, so the whole front-panel block has to go.
+	if (!c && !select_ini && !zaparoo_kiosk_active())
 	{
 		static unsigned long longpress = 0, longpress_consumed = 0;
 		static unsigned char last_but = 0;
@@ -870,11 +876,12 @@ const char* get_rbf_name_bootcore(char *str)
 
 static void vga_nag()
 {
-	// With an alt launcher configured the user has fb_terminal on by design
-	// and the CRT is fed directly by the menu core (snow pattern when status[9]=0,
-	// or the frontend's framebuffer when status[9]=1). The "fix MiSTer.ini"
-	// nag is not appropriate — just leave the OSD off without the warning.
-	if (video_fb_state() && !alt_launcher_configured())
+	// On a Zaparoo build the CRT is fed by the menu core directly (its own
+	// snow pattern) or by the frontend's framebuffer, and alt_launcher_cfg_apply
+	// owns fb_terminal, so the "fix MiSTer.ini" nag is never actionable.
+	// installed(), not configured(): the advice stays wrong with the frontend
+	// merely disabled.
+	if (video_fb_state() && !alt_launcher_installed())
 	{
 		EnableOsd_on(OSD_VGA);
 		OsdSetSize(16);
@@ -1307,7 +1314,10 @@ void HandleUI(void)
 				if (cfg.video_off_logo) off_timeout = GetTimer(10000);
 			}
 
-			if (c || menustate != MENU_FILE_SELECT2)
+			// Kiosk never opens the menu, so its idle state is MENU_NONE2, not
+			// the file browser. Without this the countdown restarts every pass
+			// and the screen never dims or powers down.
+			if (c || menustate != (zaparoo_kiosk_active() ? MENU_NONE2 : MENU_FILE_SELECT2))
 			{
 				timeout = 0;
 				if (menu_visible <= 0)
@@ -1316,7 +1326,9 @@ void HandleUI(void)
 					c = 0;
 					menu_visible = 1;
 					video_menu_bg(user_io_status_get("[3:1]"));
-					OsdMenuCtl(1);
+					// OsdMenuCtl(1) turns the overlay on with whatever is in
+					// the OSD buffer; under kiosk that would flash the menu.
+					if (!zaparoo_kiosk_active()) OsdMenuCtl(1);
 					off_timeout = 0;
 				}
 			}
@@ -1334,7 +1346,10 @@ void HandleUI(void)
 	}
 
 	//prevent OSD control while script is executing on framebuffer
-	if (((!video_fb_state() || video_chvt(0) != 2) || alt_launcher_active()) && !select_ini)
+	// Kiosk gates the whole decode: F1/F7/F9/F10/F11/F12/ESC/Backspace, the
+	// front-panel tap (it arrives here as KEY_F12|UPSTROKE) and the keyrah Fn
+	// combo, which injects straight into the menu key queue.
+	if (((!video_fb_state() || video_chvt(0) != 2) || alt_launcher_active()) && !select_ini && !zaparoo_kiosk_active())
 	{
 		switch (c)
 		{
@@ -1629,7 +1644,11 @@ void HandleUI(void)
 		// the user closes it (in CRT mode video_fb_state is false), so the OSD
 		// could never actually close. Suppress the auto-open in that case;
 		// explicit F12/MENU presses still open and close it normally.
-		else if (menu || (is_menu() && !video_fb_state() && !alt_launcher_owns_screen()) || (menustate == MENU_NONE2 && !mgl->done && mgl->state == 1))
+		// The third clause drives an MGL launch (core + ROM, how a Zaparoo card
+		// launches a game) through this state machine invisibly. Kiosk gates
+		// only the auto-open in the middle: gating the MGL clause would load
+		// the core but never mount the game.
+		else if (menu || (is_menu() && !video_fb_state() && !alt_launcher_owns_screen() && !zaparoo_kiosk_active()) || (menustate == MENU_NONE2 && !mgl->done && mgl->state == 1))
 		{
 			OsdSetSize(16);
 			menusub = 0;
@@ -7159,11 +7178,12 @@ void HandleUI(void)
 		/* system menu */
 		/******************************************************************/
 	case MENU_SYSTEM1:
-		// Without an alt launcher, the wallpaper / fb_terminal flow can't coexist
-		// with this menu — bail out so vga_nag can show the MiSTer.ini warning.
-		// With an alt launcher the OSD overlay is exactly what we want on top of
-		// the running frontend, so let it render through.
-		if (video_fb_state() && !alt_launcher_configured())
+		// Without an alt launcher the wallpaper / fb_terminal flow can't coexist
+		// with this menu, so bail out and let vga_nag show the MiSTer.ini warning.
+		// On a Zaparoo build the OSD overlay is exactly what we want on top of
+		// the frontend, so let it render through. installed(), not configured():
+		// this menu carries the only route to the page that re-enables it.
+		if (video_fb_state() && !alt_launcher_installed())
 		{
 			menustate = MENU_NONE1;
 			break;
@@ -7175,7 +7195,7 @@ void HandleUI(void)
 
 		// alt-launcher mode delegates the entire System menu render to a
 		// support helper so this upstream block stays untouched.
-		if (alt_launcher_configured())
+		if (alt_launcher_installed())
 		{
 			cr = alt_launcher_render_system_menu(menusub, &menumask, &reboot_req, &sysinfo_timer);
 			menustate = MENU_SYSTEM2;
@@ -7345,7 +7365,7 @@ void HandleUI(void)
 		/* zaparoo frontend pages (reached from System Settings)          */
 		/******************************************************************/
 	case MENU_ZAPAROO_FRONTEND1:
-		if (!alt_launcher_configured())
+		if (!alt_launcher_installed())
 		{
 			menustate = MENU_NONE1;
 			break;
@@ -7368,7 +7388,7 @@ void HandleUI(void)
 			menusub = 3;
 			break;
 		}
-		if (select || (right && menusub == 2))
+		if (select || (right && frontend_page_row_has_submenu(menusub)))
 		{
 			int act = frontend_page_select(menusub);
 			if (act == 1)
@@ -7381,6 +7401,16 @@ void HandleUI(void)
 				menustate = MENU_SYSTEM1;
 				menusub = 3;
 			}
+			else if (act == 3)
+			{
+				menustate = MENU_ZAPAROO_KIOSK1;
+				menusub = 0;
+			}
+			else if (act == 4)
+			{
+				menustate = MENU_ZAPAROO_AUTOSAVE1;
+				menusub = 0;
+			}
 			else
 			{
 				menustate = MENU_ZAPAROO_FRONTEND1;
@@ -7389,7 +7419,7 @@ void HandleUI(void)
 		break;
 
 	case MENU_ZAPAROO_POSITION1:
-		if (!alt_launcher_configured())
+		if (!alt_launcher_installed())
 		{
 			position_page_leave();
 			menustate = MENU_NONE1;
@@ -7407,13 +7437,69 @@ void HandleUI(void)
 		{
 			position_page_leave();
 			menustate = MENU_ZAPAROO_FRONTEND1;
-			menusub = 2;
+			menusub = 5;
 			break;
 		}
 		if (left || right || plus || minus)
 		{
 			position_page_adjust(menusub, (right || plus) ? 1 : -1);
 			menustate = MENU_ZAPAROO_POSITION1;
+		}
+		break;
+
+	case MENU_ZAPAROO_KIOSK1:
+		if (!alt_launcher_installed())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		parentstate = menustate;
+		kiosk_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_KIOSK2;
+		break;
+
+	case MENU_ZAPAROO_KIOSK2:
+		if (menu || back)
+		{
+			menustate = MENU_ZAPAROO_FRONTEND1;
+			menusub = 1;
+			break;
+		}
+		if (select)
+		{
+			// On confirm the page closes the OSD itself, so menustate is
+			// already reset: do not touch it here.
+			if (kiosk_page_confirm(menusub)) break;
+			menustate = MENU_ZAPAROO_FRONTEND1;
+			menusub = 1;
+		}
+		break;
+
+	case MENU_ZAPAROO_AUTOSAVE1:
+		if (!alt_launcher_installed())
+		{
+			menustate = MENU_NONE1;
+			break;
+		}
+		helptext_idx = 0;
+		parentstate = menustate;
+		autosave_page_render(menusub, &menumask);
+		menustate = MENU_ZAPAROO_AUTOSAVE2;
+		break;
+
+	case MENU_ZAPAROO_AUTOSAVE2:
+		if (menu || back)
+		{
+			menustate = MENU_ZAPAROO_FRONTEND1;
+			menusub = 2;
+			break;
+		}
+		if (select)
+		{
+			autosave_page_confirm(menusub);
+			menustate = MENU_ZAPAROO_FRONTEND1;
+			menusub = 2;
 		}
 		break;
 
