@@ -42,6 +42,7 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "support.h"
+#include "support/zaparoo/active_game.h"
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/menu_rbf.h"
 
@@ -1517,6 +1518,7 @@ void user_io_init(const char *path, const char *xml)
 	}
 
 	if (cfg.log_file_entry) MakeFile("/tmp/STARTPATH", core_path);
+	zaparoo_active_game_set_core(core_path);
 
 	if (cfg.bootcore[0] != '\0')
 	{

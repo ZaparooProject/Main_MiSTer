@@ -11,6 +11,7 @@
 #include "osd.h"
 #include "cfg.h"
 #include "recent.h"
+#include "support/zaparoo/active_game.h"
 
 #define RECENT_MAX 16
 
@@ -242,6 +243,7 @@ int recent_select(char *dir, char *path, char *label)
 
 void recent_update(char* dir, char* path, char* label, int idx)
 {
+	zaparoo_active_game_set_file(dir, path, idx);
 	if (!cfg.recents || !strlen(path)) return;
 
 	// separate the path into directory and filename
