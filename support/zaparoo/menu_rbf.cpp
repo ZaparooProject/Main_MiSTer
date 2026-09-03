@@ -19,3 +19,11 @@ bool is_menu_rbf(const char *name)
 	if (base[0] && !strcasecmp(name, base)) return true;
 	return false;
 }
+
+bool is_stock_menu_rbf(const char *name)
+{
+	if (!name || !name[0]) return false;
+	const char *base = strrchr(name, '/');
+	base = base ? base + 1 : name;
+	return !strcasecmp(base, "menu.rbf");
+}
