@@ -1308,6 +1308,17 @@ void alt_launcher_set_enabled(bool enabled)
 	alt_launcher_installed_refresh();
 	printf("alt_launcher: frontend %s\n", enabled ? "enabled" : "disabled");
 
+	// Under a console lease a script owns the VT and framebuffer and the
+	// frontend is already stopped for it, so the console is left alone. The
+	// lease's release path decides what comes back: it only re-inits when
+	// asked to resume, and alt_launcher_init() is gated on configured().
+	if (s_console_lease)
+	{
+		s_resume_after_script = enabled && alt_launcher_installed() && zaparoo_is_native_core();
+		s_script_resume_crt = s_resume_after_script && load_persisted_native_crt();
+		return;
+	}
+
 	if (!enabled)
 	{
 		stop_launcher(true);

@@ -10,7 +10,9 @@ bool zaparoo_kiosk_active(void);
 
 // Persists, then applies immediately. Enabling closes the OSD: the input gates
 // go live at once, so an open OSD would be stranded with ESC already dead.
-void zaparoo_kiosk_set(bool on);
+// Enabling while the session bypass is up closes the bypass. Returns false
+// when the setting could not be written, in which case nothing changed.
+bool zaparoo_kiosk_set(bool on);
 
 // Session-only OSD bypass. Lifts the gates without touching the setting, so a
 // card can open the OSD for a look and another can put it away. Not persisted,
