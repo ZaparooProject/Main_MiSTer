@@ -1469,7 +1469,7 @@ void user_io_init(const char *path, const char *xml)
 	user_io_read_confstr();
 	user_io_read_core_name();
 
-	if ((fpga_get_buttons() & BUTTON_OSD) && is_menu())
+	if ((fpga_get_buttons() & BUTTON_OSD) && is_menu() && !zaparoo_kiosk_active())
 	{
 		altcfg(0);
 		SelectINI();
@@ -3328,6 +3328,7 @@ void user_io_poll()
 				blks = 1;
 			}
 			DisableIO();
+			if (op == 2) zaparoo_save_note_write();
 			if ( sd_type[disk] == SD_TYPE_A2)
 			{
 				//if (op) printf("A2 %x %llu on %d\n", op,lba, disk);

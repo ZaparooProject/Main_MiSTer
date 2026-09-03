@@ -18,7 +18,9 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
                                     int *reboot_req,
                                     long *sysinfo_timer)
 {
-	if (!alt_launcher_configured()) return 0;
+	// installed(), not configured(): this layout carries the only route to the
+	// Zaparoo page, which is where the frontend gets re-enabled.
+	if (!alt_launcher_installed()) return 0;
 
 	char s[256];
 	int m = 0;
@@ -60,7 +62,7 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
 	OsdWrite(m++, " Remap keyboard            \x16", menusub == 0);
 	OsdWrite(m++, " Define joystick buttons   \x16", menusub == 1);
 	OsdWrite(m++, " Scripts                   \x16", menusub == 2);
-	OsdWrite(m++, " Frontend                  \x16", menusub == 3);
+	OsdWrite(m++, " Zaparoo                   \x16", menusub == 3);
 
 	OsdWrite(m++, "");
 	int cr = m;
@@ -76,9 +78,11 @@ int alt_launcher_render_system_menu(int menusub, uint64_t *menumask,
 
 int alt_launcher_translate_system_select(int menusub)
 {
-	if (!alt_launcher_configured()) return menusub;
+	// Must track alt_launcher_render_system_menu(): rendering the trimmed
+	// layout while dispatching through the upstream map desyncs the rows.
+	if (!alt_launcher_installed()) return menusub;
 
-	// 3 is the Frontend page link (no upstream dispatch case).
+	// 3 is the Zaparoo page link (no upstream dispatch case).
 	if (menusub == 3) return -2;
 
 	// Maps trimmed-menu menusub to upstream MENU_SYSTEM2 dispatch index:
@@ -91,5 +95,5 @@ int alt_launcher_translate_system_select(int menusub)
 
 bool alt_launcher_system_holding_reboot(int menusub)
 {
-	return alt_launcher_configured() && menusub == 4;
+	return alt_launcher_installed() && menusub == 4;
 }

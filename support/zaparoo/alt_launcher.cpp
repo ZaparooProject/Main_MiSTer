@@ -1,6 +1,7 @@
 #include "alt_launcher.h"
 #include "crt_settings.h"
 #include "launcher_input_metadata.h"
+#include "settings.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
@@ -50,13 +51,40 @@ static void zlog(const char *fmt, ...)
 
 void alt_launcher_cfg_apply(void)
 {
-	// Override any user ini values: this fork is single-purpose and the
-	// frontend needs both flags on to render.
-	cfg.fb_terminal = 1;
+	// Override any user ini values: this fork is single-purpose. recents and
+	// log_file_entry back Zaparoo's own integration points (/tmp/STARTPATH,
+	// /tmp/OSD_VISIBLE, the gameid log).
 	cfg.recents = 1;
+	cfg.log_file_entry = 1;
+	cfg.fb_terminal = 1;
 }
 
 static bool s_escaped = false;
+static int s_installed_cache = -1;
+static char s_installed_root[64] = {};
+
+bool alt_launcher_installed(void)
+{
+	// Keyed on the storage root: FindStorage() runs a cfg_parse() with the root
+	// forced to SD while waiting for USB, and this must not stay pinned to it.
+	const char *root = getRootDir();
+	if (s_installed_cache < 0 || strncmp(s_installed_root, root, sizeof(s_installed_root) - 1))
+	{
+		snprintf(s_installed_root, sizeof(s_installed_root), "%s", root);
+		s_installed_cache = FileExists(s_launcher_path, 0) ? 1 : 0;
+	}
+	return s_installed_cache != 0;
+}
+
+void alt_launcher_installed_refresh(void)
+{
+	s_installed_cache = -1;
+}
+
+bool alt_launcher_enabled(void)
+{
+	return zaparoo_settings_frontend_enabled();
+}
 
 bool alt_launcher_configured(void)
 {
@@ -64,9 +92,7 @@ bool alt_launcher_configured(void)
 	// of the OSD reverts to stock menu behavior for the rest of this session.
 	// Reboot re-execs MiSTer and resets this back to the file-existence cache.
 	if (s_escaped) return false;
-	static int cached = -1;
-	if (cached < 0) cached = FileExists(s_launcher_path, 0) ? 1 : 0;
-	return cached != 0;
+	return alt_launcher_installed() && alt_launcher_enabled();
 }
 
 uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button)
@@ -825,7 +851,10 @@ static bool valid_console_nonce(const char *nonce)
 
 bool alt_launcher_command(const char *cmd)
 {
-	if (!alt_launcher_configured() || strncmp(cmd, "zaparoo_console ", 16)) return false;
+	// installed(), not configured(): a release must never become unanswerable
+	// if the frontend is disabled while a lease is held, or the OSD key stays
+	// off with the framebuffer up for good.
+	if (!alt_launcher_installed() || strncmp(cmd, "zaparoo_console ", 16)) return false;
 
 	char action[16] = {};
 	char nonce[65] = {};
@@ -839,6 +868,13 @@ bool alt_launcher_command(const char *cmd)
 
 	if (!strcmp(action, "acquire") && fields == 3 && vt >= 1 && vt <= 63)
 	{
+		// New leases still require an enabled frontend; releases do not.
+		if (!alt_launcher_configured())
+		{
+			publish_console_state("failed", nonce);
+			return true;
+		}
+
 		if (s_console_lease)
 		{
 			if (!strcmp(nonce, s_console_lease_nonce)) publish_console_state("acquired", nonce);
@@ -1028,7 +1064,9 @@ void alt_launcher_shutdown(void)
 	zero_native_crt_words();
 	if (!s_pid)
 	{
-		if (alt_launcher_configured()) kill_stale_frontends();
+		// installed(): orphans from a previous Main hold fb0/tty7 regardless
+		// of the current enable setting.
+		if (alt_launcher_installed()) kill_stale_frontends();
 		reset_launcher_state();
 		if (s_native_crt)
 		{
@@ -1089,26 +1127,74 @@ uint8_t alt_launcher_native_crt_mode(void)
 	return mode;
 }
 
-// Stop a running launcher and queue a fresh start under `crt`: the same
-// re-entry steps as the ALT_LAUNCHER_EXIT_RELOAD path in alt_launcher_poll.
-static void restart_launcher(bool crt)
+// Stop a running launcher and drop every pending timer and flag.
+// restore_bg repaints the menu wallpaper; a restart skips it because the
+// incoming child owns the screen. alt_launcher_shutdown() is not usable here:
+// it reaps the child itself, so neither the poll child-exit path nor
+// return_to_normal_mode runs and user_io_osd_key_enable(1) never happens,
+// which would leave the OSD unopenable.
+static void stop_launcher(bool restore_bg)
 {
 	if (s_pid) wait_launcher_stopped(s_pid);
 	user_io_osd_key_enable(1);
 	release_launcher_video();
 	reset_launcher_tty();
+	// Menu core only: on a game core there is no menu background to restore.
+	if (restore_bg && is_menu()) video_menu_bg(user_io_status_get("[3:1]"));
 	s_respawn_timer = 0;
+	s_tty_deadline = 0;
+	s_init_pending = false;
 	s_crash_count = 0;
-	// Re-arm after an earlier give-up or escape: an explicit OSD action
-	// is the user asking for the frontend back.
+	// Clear an earlier give-up or escape: an explicit action leaves a clean
+	// slate either way, so a later enable is not blocked by a stale flag.
 	s_gave_up = false;
 	s_escaped = false;
+	s_resume_after_script = false;
+	s_script_resume_crt = false;
+}
+
+// Stop a running launcher and queue a fresh start under `crt`: the same
+// re-entry steps as the ALT_LAUNCHER_EXIT_RELOAD path in alt_launcher_poll.
+static void restart_launcher(bool crt)
+{
+	stop_launcher(false);
 	alt_launcher_init(crt);
 }
 
 void alt_launcher_respawn(void)
 {
 	restart_launcher(load_persisted_native_crt());
+}
+
+void alt_launcher_set_enabled(bool enabled)
+{
+	// A redundant "on" must not tear down and respawn a running frontend.
+	if (alt_launcher_enabled() == enabled) return;
+	if (!zaparoo_settings_set_frontend_enabled(enabled)) return;
+	// An updater may have installed the frontend after Main started.
+	alt_launcher_installed_refresh();
+	printf("alt_launcher: frontend %s\n", enabled ? "enabled" : "disabled");
+
+	// Under a console lease a script owns the VT and framebuffer and the
+	// frontend is already stopped for it, so the console is left alone. The
+	// lease's release path decides what comes back: it only re-inits when
+	// asked to resume, and alt_launcher_init() is gated on configured().
+	if (s_console_lease)
+	{
+		s_resume_after_script = enabled && alt_launcher_installed() && zaparoo_is_native_core();
+		s_script_resume_crt = s_resume_after_script && load_persisted_native_crt();
+		return;
+	}
+
+	if (!enabled)
+	{
+		stop_launcher(true);
+		return;
+	}
+
+	// Only the launcher core hosts the frontend; enabling over a game core
+	// must not fork it on top of the running game.
+	if (alt_launcher_installed() && zaparoo_is_native_core()) alt_launcher_respawn();
 }
 
 void alt_launcher_toggle_native_crt(void)
