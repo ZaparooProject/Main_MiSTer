@@ -3,9 +3,14 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include "file_io.h"
 
 static const char s_active_game_file[] = "/tmp/ACTIVEGAME";
+// Zaparoo Core and mrext generate this MGL for every load_core they send and
+// write the real game path to ACTIVEGAME themselves before sending it. The file
+// is rewritten on the next launch, so its path never identifies a game.
+static const char s_launcher_temp_mgl[] = "/media/fat/.LASTLAUNCH.mgl";
 
 static void active_game_write(const char *path)
 {
@@ -26,6 +31,7 @@ static void active_game_write(const char *path)
 
 void zaparoo_active_game_set_core(const char *path)
 {
+	if (path && isXmlName(path) == 2 && !strcasecmp(getFullPath(path), s_launcher_temp_mgl)) return;
 	active_game_write(path && isXmlName(path) ? path : "");
 }
 
