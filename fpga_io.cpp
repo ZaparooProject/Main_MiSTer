@@ -434,7 +434,7 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 	// save, so the flush has to happen before it, and before the frontend
 	// teardown blanks the screen behind the banner.
 	if (zaparoo_save_defer_core_load(name, cfg, xml)) return 0;
-	alt_launcher_shutdown();
+	if (!alt_launcher_shutdown()) return -EBUSY;
 	OsdDisable();
 	static char path[1024];
 	int ret = 0;
@@ -520,6 +520,7 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 static uint32_t gpo_copy = 0;
 void inline fpga_gpo_write(uint32_t value)
 {
+	if (alt_launcher_uio_owned()) return;
 	gpo_copy = value;
 	writel(value, (void*)(SOCFPGA_MGR_ADDRESS + 0x10));
 }
@@ -633,7 +634,7 @@ void app_restart(const char *path, const char *xml, const char *exe)
 	// getFullPath(cfg.main)), which alt_launcher_shutdown() rewrites.
 	static char exe_copy[PATH_MAX];
 	if (exe) { snprintf(exe_copy, sizeof(exe_copy), "%s", exe); exe = exe_copy; }
-	alt_launcher_shutdown();
+	if (!alt_launcher_shutdown()) return;
 	sync();
 	fpga_core_reset(1);
 
@@ -702,6 +703,7 @@ void fpga_wait_to_reset()
 
 uint16_t fpga_spi(uint16_t word)
 {
+	if (alt_launcher_uio_owned()) return 0;
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE)) | word;
 
 	fpga_gpo_write(gpo);
@@ -737,6 +739,7 @@ uint16_t fpga_spi(uint16_t word)
 
 uint16_t fpga_spi_fast(uint16_t word)
 {
+	if (alt_launcher_uio_owned()) return 0;
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE)) | word;
 	fpga_gpo_write(gpo);
 	fpga_gpo_write(gpo | SSPI_STROBE);
@@ -746,6 +749,7 @@ uint16_t fpga_spi_fast(uint16_t word)
 
 void fpga_spi_fast_block_write(const uint16_t *buf, uint32_t length)
 {
+	if (alt_launcher_uio_owned()) return;
 	uint32_t gpoH = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t gpo = gpoH;
 
@@ -761,6 +765,7 @@ void fpga_spi_fast_block_write(const uint16_t *buf, uint32_t length)
 
 void fpga_spi_fast_block_read(uint16_t *buf, uint32_t length)
 {
+	if (alt_launcher_uio_owned()) { memset(buf, 0, length * sizeof(*buf)); return; }
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t rem = length % 16;
 	length /= 16;
@@ -844,6 +849,7 @@ void fpga_spi_fast_block_read(uint16_t *buf, uint32_t length)
 
 void fpga_spi_fast_block_write_8(const uint8_t *buf, uint32_t length)
 {
+	if (alt_launcher_uio_owned()) return;
 	uint32_t gpoH = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t gpo = gpoH;
 	uint32_t rem = length % 16;
@@ -930,6 +936,7 @@ void fpga_spi_fast_block_write_8(const uint8_t *buf, uint32_t length)
 
 void fpga_spi_fast_block_read_8(uint8_t *buf, uint32_t length)
 {
+	if (alt_launcher_uio_owned()) { memset(buf, 0, length); return; }
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t rem = length % 16;
 	length /= 16;
@@ -1013,6 +1020,7 @@ void fpga_spi_fast_block_read_8(uint8_t *buf, uint32_t length)
 
 void fpga_spi_fast_block_write_be(const uint16_t *buf, uint32_t length)
 {
+	if (alt_launcher_uio_owned()) return;
 	uint32_t gpoH = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t gpo = gpoH;
 
@@ -1030,6 +1038,7 @@ void fpga_spi_fast_block_write_be(const uint16_t *buf, uint32_t length)
 
 void fpga_spi_fast_block_read_be(uint16_t *buf, uint32_t length)
 {
+	if (alt_launcher_uio_owned()) { memset(buf, 0, length * sizeof(*buf)); return; }
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 
 	// should be optimized for speed by compiler automatically

@@ -7635,7 +7635,7 @@ void HandleUI(void)
 	case MENU_SCRIPTS_FB:
 		if (cfg.fb_terminal)
 		{
-			alt_launcher_prepare_for_script();
+			if (!alt_launcher_prepare_for_script()) { menustate = MENU_SYSTEM1; break; }
 			memcpy(Selected_F[0], selPath, sizeof(Selected_F[0]));
 			static char cmd[1024 * 2];
 			const char *path = getFullPath(selPath);

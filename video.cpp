@@ -3475,6 +3475,7 @@ static void fb_write_module_params()
 static void video_fb_set(int enable, int n, int update_module)
 {
 	PROFILE_FUNCTION();
+	if (alt_launcher_blank_framebuffer()) return;
 
 	if (fb_base)
 	{
@@ -3946,6 +3947,8 @@ void video_menu_bg(int n, int idle)
 		cached_idle = idle;
 	}
 
+	if (alt_launcher_hide_framebuffer() || alt_launcher_uio_owned()) return;
+
 	if (n)
 	{
 		//printf("**** BG DEBUG START ****\n");
@@ -4220,7 +4223,7 @@ int video_chvt(int num)
 
 void video_cmd(char *cmd)
 {
-	if (video_fb_state())
+	if (!alt_launcher_uio_owned() && (video_fb_state() || alt_launcher_hide_framebuffer()))
 	{
 		int accept = 0;
 		int fmt = 0, rb = 0, div = -1, width = -1, height = -1;
@@ -4335,6 +4338,9 @@ void video_cmd(char *cmd)
 				yoff = v_cur.item[8] - FB_DV_UBRD;
 			}
 
+			// Startup probes update geometry without revealing the Linux console.
+			if (!alt_launcher_hide_framebuffer())
+			{
 			spi_uio_cmd_cont(UIO_SET_FBUF);
 			spi_w(FB_EN | sc_fmt); // format, enable flag
 			spi_w((uint16_t)addr); // base address low word
@@ -4347,6 +4353,7 @@ void video_cmd(char *cmd)
 			spi_w(yoff + vmax);    // scaled bottom
 			spi_w(stride);         // stride
 			DisableIO();
+			}
 
 			if (cmd[6] != '2')
 			{

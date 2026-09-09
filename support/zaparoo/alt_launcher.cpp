@@ -1,4 +1,6 @@
 #include "alt_launcher.h"
+#include "scanout.h"
+#include "bootstrap.h"
 #include "crt_settings.h"
 #include "launcher_input_metadata.h"
 #include "settings.h"
@@ -26,6 +28,7 @@
 #include "hardware.h"
 #include "input.h"
 #include "menu.h"
+#include "osd.h"
 #include "scheduler.h"
 #include "shmem.h"
 #include "smbus.h"
@@ -134,6 +137,8 @@ bool alt_launcher_kbd_to_frontend(uint16_t code)
 }
 
 static pid_t s_pid = 0;
+static zaparoo_scanout::Bootstrap s_bootstrap;
+static bool s_scanout_ready = false;
 static unsigned long s_spawn_time = 0;
 static bool s_pending_logged = false;
 static int s_crash_count = 0;
@@ -505,6 +510,7 @@ static void finish_native_crt_path(void)
 // page) so CRT settings can still be fixed from there.
 static void return_to_normal_mode(bool escaped)
 {
+	s_bootstrap.cancel();
 	user_io_osd_key_enable(1);
 	reset_launcher_tty();
 	video_menu_bg(user_io_status_get("[3:1]"));
@@ -524,6 +530,9 @@ static void return_to_normal_mode(bool escaped)
 
 static void reset_launcher_state(void)
 {
+	s_bootstrap.cancel();
+	zaparoo_scanout::stop();
+	s_scanout_ready = false;
 	s_pid = 0;
 	s_respawn_timer = 0;
 	s_tty_deadline = 0;
@@ -549,7 +558,7 @@ static void kill_launcher(pid_t pid, int sig)
 		kill(pid, sig);
 }
 
-static void wait_launcher_stopped(pid_t pid)
+static bool wait_launcher_stopped(pid_t pid)
 {
 	kill_launcher(pid, SIGTERM);
 	for (int i = 0; i < 50; i++)
@@ -575,6 +584,14 @@ static void wait_launcher_stopped(pid_t pid)
 			usleep(10000);
 		}
 	}
+	if (s_pid)
+	{
+		zlog("stop timed out for pid=%d; retaining video ownership", pid);
+		return false;
+	}
+	zaparoo_scanout::stop();
+	s_scanout_ready = false;
+	return true;
 }
 
 // Kill frontend processes this Main did not spawn: a previous Main that was
@@ -622,8 +639,9 @@ static void kill_stale_frontends(void)
 	}
 }
 
-static void release_launcher_video(void)
+static void release_launcher_video(bool keep_black = false)
 {
+	if (!keep_black) s_bootstrap.cancel();
 	s_hdmi_fb_reassert_timer = 0;
 	s_hdmi_fb_reasserts_remaining = 0;
 	if (s_native_crt)
@@ -651,6 +669,7 @@ static void exec_launcher_child(const char *path)
 	// Die with Main (a killed or crashed Main must not leave a frontend
 	// holding fb0 and the VT for the next Main to fight with).
 	prctl(PR_SET_PDEATHSIG, SIGKILL);
+	zaparoo_scanout::child_environment();
 
 	int tty_fd = open(s_tty_path, O_RDWR);
 	if (tty_fd >= 0)
@@ -702,6 +721,34 @@ static bool switch_to_vt(int vt)
 	return active;
 }
 
+static void begin_bootstrap()
+{
+	// Direct Video needs its separate VGA framebuffer mux; keep its old path.
+	s_bootstrap.start(is_menu() && !s_native_crt && !cfg.direct_video && zaparoo_scanout::bootstrap_available(), GetTimer(0));
+	if (s_bootstrap.hidden())
+	{
+		OsdDisable();
+		user_io_osd_key_enable(0);
+		video_fb_reassert();
+		if (s_bootstrap.hidden()) zlog("bootstrap: black before frontend startup");
+	}
+}
+
+bool alt_launcher_hide_framebuffer(void)
+{
+	return s_bootstrap.hidden();
+}
+
+bool alt_launcher_blank_framebuffer(void)
+{
+	if (!s_bootstrap.hidden()) return false;
+	if (zaparoo_scanout::owned()) return true;
+	if (zaparoo_scanout::blank_framebuffer()) return true;
+	printf("alt_launcher: black startup unsupported, using framebuffer fallback\n");
+	s_bootstrap.cancel();
+	return false;
+}
+
 static void finalize_spawn(bool tty_ready)
 {
 	// Defer the VT/fb takeover until the FPGA/HDMI has settled; s_tty_deadline
@@ -735,6 +782,7 @@ static void finalize_spawn(bool tty_ready)
 	// up (e.g. user toggled CRT mode or hit Reboot from System Settings),
 	// it would trap input with no way to dismiss it — drop it now.
 	if (menu_present()) MenuHide();
+	s_scanout_ready = true;
 }
 
 static void spawn(void)
@@ -745,6 +793,7 @@ static void spawn(void)
 	strncpy(path, getFullPath(s_launcher_path), sizeof(path) - 1);
 	path[sizeof(path) - 1] = '\0';
 
+	begin_bootstrap();
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 
@@ -762,13 +811,18 @@ static void spawn(void)
 		// current geometry back into the kernel; that delayed write can otherwise
 		// overwrite the child's smaller framebuffer after Qt has mapped it.
 		video_fb_reassert();
-		printf("alt_launcher: HPS framebuffer path enabled\n");
+		printf("alt_launcher: %s\n", s_bootstrap.hidden() ?
+		       "bootstrap black (mode probing enabled)" : "HPS framebuffer path enabled");
 	}
 
+	s_scanout_ready = false;
+	zaparoo_scanout::prepare(!s_native_crt && !cfg.direct_video);
 	s_pid = fork();
 	if (s_pid < 0)
 	{
 		printf("alt_launcher: fork failed: %s\n", strerror(errno));
+		s_bootstrap.cancel();
+		zaparoo_scanout::stop();
 		s_pid = 0;
 		user_io_osd_key_enable(1);
 		if (s_native_crt) disable_native_crt_path();
@@ -779,6 +833,7 @@ static void spawn(void)
 	{
 		exec_launcher_child(path);
 	}
+	zaparoo_scanout::parent_started(s_pid);
 	s_spawn_time = GetTimer(0);
 	zlog("spawned pid=%d path=%s", s_pid, path);
 
@@ -786,6 +841,11 @@ static void spawn(void)
 
 	s_tty_deadline = GetTimer(1000);
 	if (!s_tty_deadline) s_tty_deadline = 1;
+}
+
+bool alt_launcher_uio_owned(void)
+{
+	return s_pid != 0 && zaparoo_scanout::owned();
 }
 
 bool alt_launcher_active(void)
@@ -826,7 +886,7 @@ bool alt_launcher_native_crt(void)
 
 void alt_launcher_init(bool native_crt)
 {
-	if (!alt_launcher_configured() || s_pid || s_gave_up)
+	if (!alt_launcher_configured() || s_pid || s_init_pending || s_gave_up)
 		return;
 	s_crash_count = 0;
 	s_respawn_timer = 0;
@@ -846,20 +906,22 @@ void alt_launcher_init(bool native_crt)
 	s_hdmi_edid_attempts = 0;
 	s_init_pending = true;
 	s_pending_logged = false;
+	begin_bootstrap();
 	zlog("init queued: native_crt=%d edid=%d fb_state=%d", native_crt, video_get_edid(NULL, NULL), video_fb_state());
 }
 
-void alt_launcher_prepare_for_script(void)
+bool alt_launcher_prepare_for_script(void)
 {
-	reset_launcher_tty();
 	if (!s_pid)
-		return;
+	{
+		reset_launcher_tty();
+		return true;
+	}
 
 	printf("alt_launcher: suspending launcher for script\n");
+	if (!wait_launcher_stopped(s_pid)) return false;
 	s_resume_after_script = true;
 	s_script_resume_crt = s_native_crt;
-	pid_t pid = s_pid;
-	wait_launcher_stopped(pid);
 	user_io_osd_key_enable(1);
 	s_respawn_timer = 0;
 	s_tty_deadline = 0;
@@ -868,6 +930,7 @@ void alt_launcher_prepare_for_script(void)
 	s_gave_up = false;
 	release_launcher_video();
 	reset_launcher_tty();
+	return true;
 }
 
 void alt_launcher_resume_after_script(void)
@@ -955,7 +1018,11 @@ bool alt_launcher_command(const char *cmd)
 			return true;
 		}
 
-		alt_launcher_prepare_for_script();
+		if (!alt_launcher_prepare_for_script())
+		{
+			publish_console_state("busy", nonce);
+			return true;
+		}
 		if (!switch_to_vt(vt))
 		{
 			publish_console_state("failed", nonce);
@@ -995,6 +1062,20 @@ bool alt_launcher_command(const char *cmd)
 
 void alt_launcher_poll(void)
 {
+	bool was_scanout_owned = zaparoo_scanout::owned();
+	if (!s_pid)
+	{
+		zaparoo_scanout::stop();
+		s_scanout_ready = false;
+	}
+	else if (zaparoo_scanout::poll(s_scanout_ready))
+	{
+		s_bootstrap.grant();
+		if (s_bootstrap.hidden()) zlog("bootstrap: bus granted, latch owns reveal");
+		s_hdmi_fb_reassert_timer = 0;
+		s_hdmi_fb_reasserts_remaining = 0;
+	}
+	if (s_pid && !zaparoo_scanout::offered()) s_bootstrap.fallback(GetTimer(0));
 	if (s_pid)
 	{
 		if (s_native_crt && s_native_crt_finish_timer && CheckTimer(s_native_crt_finish_timer))
@@ -1029,6 +1110,8 @@ void alt_launcher_poll(void)
 		int status;
 		if (waitpid(s_pid, &status, WNOHANG) == s_pid)
 		{
+			zaparoo_scanout::stop();
+			s_scanout_ready = false;
 			s_pid = 0;
 			s_tty_deadline = 0;
 			s_hdmi_fb_reassert_timer = 0;
@@ -1048,7 +1131,7 @@ void alt_launcher_poll(void)
 			{
 				bool crt = load_persisted_native_crt();
 				printf("alt_launcher: reload requested, respawning (crt=%d)\n", crt);
-				release_launcher_video();
+				release_launcher_video(true);
 				reset_launcher_tty();
 				s_respawn_timer = 0;
 				s_crash_count = 0;
@@ -1072,10 +1155,20 @@ void alt_launcher_poll(void)
 				return_to_normal_mode(false);
 				return;
 			}
+			begin_bootstrap();
 			s_respawn_timer = GetTimer(1000);
 			if (!s_respawn_timer) s_respawn_timer = 1;
 			return;
 		}
+
+		if (s_bootstrap.expire(GetTimer(0)))
+		{
+			zlog("bootstrap: returning to fb0 fallback");
+			zaparoo_scanout::stop();
+			video_fb_reassert();
+		}
+		else if (was_scanout_owned && !zaparoo_scanout::owned() && !s_bootstrap.hidden() && !s_native_crt)
+			video_fb_reassert();
 
 		// The child was spawned against the fallback video mode. Once the
 		// display finally answers, re-init and restart it so its startup
@@ -1108,7 +1201,7 @@ void alt_launcher_poll(void)
 		// video_menu_bg) does exactly that. Re-assert so the frontend's
 		// startup vmode probes and its later output never land on a
 		// disabled framebuffer.
-		if (!s_native_crt && !video_fb_state() && (!s_fb_watchdog_timer || CheckTimer(s_fb_watchdog_timer)))
+		if (!s_native_crt && !alt_launcher_uio_owned() && !video_fb_state() && (!s_fb_watchdog_timer || CheckTimer(s_fb_watchdog_timer)))
 		{
 			s_fb_watchdog_timer = GetTimer(250);
 			if (!s_fb_watchdog_timer) s_fb_watchdog_timer = 1;
@@ -1188,17 +1281,15 @@ void alt_launcher_poll(void)
 	}
 }
 
-void alt_launcher_shutdown(void)
+bool alt_launcher_shutdown(void)
 {
 	fflush(stdout);
-	// Every FPGA reconfiguration passes through here, so the incoming core
-	// cannot inherit a stale native video control block.
-	zero_native_crt_words();
 	if (!s_pid)
 	{
 		// installed(): orphans from a previous Main hold fb0/tty7 regardless
 		// of the current enable setting.
 		if (alt_launcher_installed()) kill_stale_frontends();
+		zero_native_crt_words();
 		reset_launcher_state();
 		if (s_native_crt)
 		{
@@ -1210,35 +1301,12 @@ void alt_launcher_shutdown(void)
 		// is_menu() is a per-process cache of orig_name, so it is still true:
 		// video_fb_set()'s menu-background fallback would flip the disable
 		// into FB_EN at menu geometry and write it into the new core.
-		return;
+		return true;
 	}
 
-	pid_t pid = s_pid;
-	kill_launcher(pid, SIGTERM);
-	for (int i = 0; i < 50; i++)
-	{
-		if (waitpid(pid, NULL, WNOHANG) == pid)
-		{
-			s_pid = 0;
-			break;
-		}
-		usleep(10000);
-	}
-	if (s_pid)
-	{
-		kill_launcher(pid, SIGKILL);
-		// Bounded — don't wedge the UI if the task is stuck in D-state.
-		for (int i = 0; i < 100; i++)
-		{
-			if (waitpid(pid, NULL, WNOHANG) == pid)
-			{
-				s_pid = 0;
-				break;
-			}
-			usleep(10000);
-		}
-	}
-
+	if (!wait_launcher_stopped(s_pid)) return false;
+	// The writer is gone: clear its control block before reconfiguration.
+	zero_native_crt_words();
 	reset_launcher_state();
 	if (s_native_crt)
 	{
@@ -1249,6 +1317,7 @@ void alt_launcher_shutdown(void)
 	{
 		video_fb_enable(0);
 	}
+	return true;
 }
 
 bool alt_launcher_native_crt_persisted(void)
@@ -1270,11 +1339,11 @@ uint8_t alt_launcher_native_crt_mode(void)
 // it reaps the child itself, so neither the poll child-exit path nor
 // return_to_normal_mode runs and user_io_osd_key_enable(1) never happens,
 // which would leave the OSD unopenable.
-static void stop_launcher(bool restore_bg)
+static bool stop_launcher(bool restore_bg)
 {
-	if (s_pid) wait_launcher_stopped(s_pid);
+	if (s_pid && !wait_launcher_stopped(s_pid)) return false;
 	user_io_osd_key_enable(1);
-	release_launcher_video();
+	release_launcher_video(!restore_bg);
 	reset_launcher_tty();
 	// Menu core only: on a game core there is no menu background to restore.
 	if (restore_bg && is_menu()) video_menu_bg(user_io_status_get("[3:1]"));
@@ -1291,14 +1360,14 @@ static void stop_launcher(bool restore_bg)
 	s_escaped = false;
 	s_resume_after_script = false;
 	s_script_resume_crt = false;
+	return true;
 }
 
 // Stop a running launcher and queue a fresh start under `crt`: the same
 // re-entry steps as the ALT_LAUNCHER_EXIT_RELOAD path in alt_launcher_poll.
 static void restart_launcher(bool crt)
 {
-	stop_launcher(false);
-	alt_launcher_init(crt);
+	if (stop_launcher(false)) alt_launcher_init(crt);
 }
 
 void alt_launcher_respawn(void)

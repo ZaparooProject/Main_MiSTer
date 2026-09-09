@@ -12,12 +12,17 @@
 
 void alt_launcher_init(bool native_crt);
 void alt_launcher_poll(void);
-void alt_launcher_shutdown(void);
-void alt_launcher_prepare_for_script(void);
+// False means the child could not be reaped; callers must not take over video.
+bool alt_launcher_shutdown(void);
+bool alt_launcher_prepare_for_script(void);
 void alt_launcher_resume_after_script(void);
 bool alt_launcher_command(const char *cmd);
 bool alt_launcher_native_crt(void);
 bool alt_launcher_active(void);
+// Only true after the child finishes video setup and receives acknowledgment.
+bool alt_launcher_uio_owned(void);
+bool alt_launcher_hide_framebuffer(void);
+bool alt_launcher_blank_framebuffer(void);
 // True from the moment a launcher start is queued (or a respawn is pending)
 // until the child exits: the OSD must not auto-open over that window.
 bool alt_launcher_owns_screen(void);
