@@ -1,11 +1,14 @@
 #include "core_watchdog.h"
+#include "core_identity.h"
 #include "alt_launcher.h"
 #include "service_boot.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "hardware.h"
 
@@ -24,6 +27,43 @@ static int read_core_pid(void)
 	if (fscanf(fp, "%d", &pid) != 1 || pid <= 1) pid = 0;
 	fclose(fp);
 	return pid;
+}
+
+static bool pid_matches_core(int pid)
+{
+	char path[64], exe[PATH_MAX];
+	snprintf(path, sizeof(path), "/proc/%d/exe", pid);
+	ssize_t len = readlink(path, exe, sizeof(exe) - 1);
+	if (len <= 0 || len >= (ssize_t)sizeof(exe) - 1) return false;
+	exe[len] = 0;
+	const char deleted[] = " (deleted)";
+	if (len >= (ssize_t)sizeof(deleted) - 1 &&
+	    !strcmp(exe + len - (sizeof(deleted) - 1), deleted))
+		exe[len - (sizeof(deleted) - 1)] = 0;
+	if (zaparoo_core_identity::service_binary(exe)) return true;
+	if (!zaparoo_core_identity::shell_binary(exe)) return false;
+
+	// Shell-backed service caches name the script in argv[1], not exe.
+	// Only complete NUL-delimited arguments count; bound work on Main's loop.
+	snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
+	FILE *fp = fopen(path, "re");
+	if (!fp) return false;
+	char args[4096];
+	size_t count = fread(args, 1, sizeof(args), fp);
+	bool failed = ferror(fp);
+	fclose(fp);
+	if (failed) return false;
+	unsigned argument = 0;
+	for (size_t start = 0, i = 0; i < count; ++i)
+	{
+		if (!args[i])
+		{
+			if (argument == 1) return zaparoo_core_identity::service_binary(args + start);
+			++argument;
+			start = i + 1;
+		}
+	}
+	return false;
 }
 
 static long memory_available_kib(void)
@@ -65,15 +105,19 @@ void zaparoo_core_watchdog_poll(void)
 	// yet. SIGKILL and OOM can leave the old PID behind; that stale file is
 	// a recovery hint, not proof of why the process exited.
 	if (!pid) return;
-	if (!kill(pid, 0) || errno == EPERM)
+	int result = kill(pid, 0);
+	int probe_error = errno;
+	if (result && probe_error != EPERM && probe_error != ESRCH) return;
+	if ((!result || probe_error == EPERM) && pid_matches_core(pid))
 	{
 		s_restart_timer = 0;
 		return;
 	}
-	if (errno != ESRCH) return;
+	// Recheck identity even on the first observation after Main re-exec.
+	// Core owns stale-PID cleanup under its start gate; Main never unlinks it.
 	if (s_restart_timer && !CheckTimer(s_restart_timer)) return;
 
-	printf("zaparoo_core_watchdog: Core pid %d disappeared, restarting (MemAvailable=%ld KiB)\n",
+	printf("zaparoo_core_watchdog: Core pid %d missing or identity unverified, ensuring service (MemAvailable=%ld KiB)\n",
 	       pid, memory_available_kib());
 	zaparoo_service_start_async();
 	s_restart_timer = GetTimer(CORE_WATCHDOG_RETRY_MS);
