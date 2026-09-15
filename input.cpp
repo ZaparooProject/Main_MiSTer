@@ -2112,7 +2112,7 @@ static void uinp_check_key()
 {
 	if (uinp_fd > 0)
 	{
-		if (!grabbed && !user_io_osd_is_visible())
+		if ((!grabbed || alt_launcher_active()) && !user_io_osd_is_visible())
 		{
 			if (uinp_ev.value && CheckTimer(uinp_repeat))
 			{
