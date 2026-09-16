@@ -21,6 +21,7 @@ bool alt_launcher_native_crt(void);
 bool alt_launcher_active(void);
 // Only true after the child finishes video setup and receives acknowledgment.
 bool alt_launcher_uio_owned(void);
+bool alt_launcher_scanout_active(void);
 bool alt_launcher_hide_framebuffer(void);
 bool alt_launcher_blank_framebuffer(void);
 // True from the moment a launcher start is queued (or a respawn is pending)

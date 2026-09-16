@@ -150,6 +150,7 @@ static unsigned long s_hdmi_edid_retry_timer = 0;
 static unsigned long s_hdmi_edid_hold_deadline = 0;
 static unsigned long s_hdmi_edid_watch_deadline = 0;
 static bool s_hdmi_edid_retried = false;
+static bool s_spawn_had_edid = false;
 static bool s_hdmi_link_was_down = false;
 static int s_hdmi_edid_attempts = 0;
 static unsigned long s_tty_deadline = 0;
@@ -797,7 +798,8 @@ static void spawn(void)
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 
-	zlog("spawn: native_crt=%d fb_state=%d edid=%d menu_present=%d", s_native_crt, video_fb_state(), video_get_edid(NULL, NULL), menu_present());
+	s_spawn_had_edid = video_get_edid(NULL, NULL) != 0;
+	zlog("spawn: native_crt=%d fb_state=%d edid=%d menu_present=%d", s_native_crt, video_fb_state(), s_spawn_had_edid, menu_present());
 	if (s_native_crt)
 	{
 		prepare_native_crt_path();
@@ -844,6 +846,11 @@ static void spawn(void)
 }
 
 bool alt_launcher_uio_owned(void)
+{
+	return s_pid != 0 && zaparoo_scanout::bus_owned();
+}
+
+bool alt_launcher_scanout_active(void)
 {
 	return s_pid != 0 && zaparoo_scanout::owned();
 }
@@ -1170,6 +1177,16 @@ void alt_launcher_poll(void)
 		else if (was_scanout_owned && !zaparoo_scanout::owned() && !s_bootstrap.hidden() && !s_native_crt)
 			video_fb_reassert();
 
+		// Upstream hot-plug handling can finish EDID outside our bounded
+		// watch window. A fallback-sized child must reprobe even then; merely
+		// clearing the watch leaves its scaler viewport at the old resolution.
+		if (!s_native_crt && !s_console_lease && !s_spawn_had_edid && video_get_edid(NULL, NULL))
+		{
+			zlog("late EDID: restarting fallback-sized frontend");
+			restart_launcher(false);
+			return;
+		}
+
 		// The child was spawned against the fallback video mode. Once the
 		// display finally answers, re-init and restart it so its startup
 		// probe runs against the real mode - nothing else would notice
@@ -1201,7 +1218,7 @@ void alt_launcher_poll(void)
 		// video_menu_bg) does exactly that. Re-assert so the frontend's
 		// startup vmode probes and its later output never land on a
 		// disabled framebuffer.
-		if (!s_native_crt && !alt_launcher_uio_owned() && !video_fb_state() && (!s_fb_watchdog_timer || CheckTimer(s_fb_watchdog_timer)))
+		if (!s_native_crt && !alt_launcher_scanout_active() && !video_fb_state() && (!s_fb_watchdog_timer || CheckTimer(s_fb_watchdog_timer)))
 		{
 			s_fb_watchdog_timer = GetTimer(250);
 			if (!s_fb_watchdog_timer) s_fb_watchdog_timer = 1;

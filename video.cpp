@@ -3947,7 +3947,7 @@ void video_menu_bg(int n, int idle)
 		cached_idle = idle;
 	}
 
-	if (alt_launcher_hide_framebuffer() || alt_launcher_uio_owned()) return;
+	if (alt_launcher_hide_framebuffer() || alt_launcher_scanout_active()) return;
 
 	if (n)
 	{
@@ -4223,7 +4223,7 @@ int video_chvt(int num)
 
 void video_cmd(char *cmd)
 {
-	if (!alt_launcher_uio_owned() && (video_fb_state() || alt_launcher_hide_framebuffer()))
+	if (!alt_launcher_scanout_active() && (video_fb_state() || alt_launcher_hide_framebuffer()))
 	{
 		int accept = 0;
 		int fmt = 0, rb = 0, div = -1, width = -1, height = -1;
