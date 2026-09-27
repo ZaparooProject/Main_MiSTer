@@ -37,6 +37,7 @@
 #include "scaler.h"
 #include "file_io.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/command_stream.h"
 #include "support/zaparoo/launcher_input_metadata.h"
 
 #define NUMDEV 30
@@ -5628,7 +5629,8 @@ int input_test(int getchar)
 	if (state == 2)
 	{
 		int timeout = 0;
-		if (is_menu() && (video_fb_state() || alt_launcher_active())) timeout = 25;
+		if (is_menu() && !alt_launcher_scanout_active() && (video_fb_state() || alt_launcher_active())) timeout = 25;
+		const unsigned long launcher_drain_deadline = GetTimer(4);
 
 		while (1)
 		{
@@ -5902,7 +5904,7 @@ int input_test(int getchar)
 									}
 								}
 
-								if (is_menu() && !video_fb_state())
+								if (is_menu() && !video_fb_state() && !alt_launcher_active())
 								{
 									/*
 									if (mapping && mapping_type <= 1 && !(ev.type==EV_KEY && ev.value>1))
@@ -6262,10 +6264,10 @@ int input_test(int getchar)
 			{
 				static char cmd[1024];
 				int len = read(pool[NUMDEV + 1].fd, cmd, sizeof(cmd) - 1);
-				if (len)
+				if (len > 0)
 				{
-					if (cmd[len - 1] == '\n') cmd[len - 1] = 0;
-					cmd[len] = 0;
+					static ZaparooCommandStream stream;
+					stream.feed(cmd, size_t(len), [](char *cmd) {
 					printf("MiSTer_cmd: %s\n", cmd);
 					if (!strncmp(cmd, "zaparoo_", 8)) zaparoo_command(cmd);
 					else if (!strncmp(cmd, "fb_cmd", 6)) video_cmd(cmd);
@@ -6299,6 +6301,7 @@ int input_test(int getchar)
 						else if (!strcmp(cmd + 7, "unmute")) set_volume(0x80);
 						else if (cmd[7] >= '0' && cmd[7] <= '7') set_volume(0x40 - 0x30 + cmd[7]);
 					}
+					});
 				}
 			}
 
@@ -6315,6 +6318,9 @@ int input_test(int getchar)
 				// UI cothread starves.
 				if (return_value == 1) break;
 			}
+			// Noisy pads may never leave 25 ms of silence. Give the launcher's
+			// UI, video setup, and child supervision a turn even under input load.
+			if (alt_launcher_active() && CheckTimer(launcher_drain_deadline)) break;
 		}
 
 		if (cur_leds != leds_state)

@@ -1,4 +1,5 @@
 #include "scanout.h"
+#include "scanout_proxy.h"
 #include "../../spi.h"
 #include "../../user_io.h"
 
@@ -19,9 +20,9 @@
 
 namespace zaparoo_scanout {
 namespace {
-const char request[] = "ZAPAROO-SCANOUT-1";
-const char granted[] = "ZAPAROO-SCANOUT-1 OK";
-const char rejected[] = "ZAPAROO-SCANOUT-1 NO";
+const char request[] = "ZAPAROO-SCANOUT-2";
+const char granted[] = "ZAPAROO-SCANOUT-2 PROXY";
+const char rejected[] = "ZAPAROO-SCANOUT-2 NO";
 const char device[] = "/dev/zaparoo-scanout";
 const char module[] = "/media/fat/zaparoo/modules/6.18.38-MiSTer/zaparoo_scanout.ko";
 int parent_fd = -1;
@@ -31,6 +32,7 @@ pid_t owner_pid = 0;
 pid_t loader_pid = 0;
 bool requested = false;
 bool granted_lease = false;
+bool proxied_lease = false;
 bool loader_tried = false;
 unsigned long long loader_started = 0;
 
@@ -169,6 +171,7 @@ void stop()
 	frontend_pid = 0;
 	requested = false;
 	granted_lease = false;
+	proxied_lease = false;
 	if (loader_pid)
 	{
 		kill(loader_pid, SIGKILL);
@@ -215,6 +218,7 @@ void parent_started(pid_t pid)
 }
 
 bool owned() { return granted_lease; }
+bool bus_owned() { return granted_lease && !proxied_lease; }
 bool offered() { return parent_fd >= 0; }
 
 bool bootstrap_available()
@@ -244,8 +248,8 @@ bool poll(bool video_ready)
 		if (result == loader_pid || (result < 0 && errno == ECHILD)) loader_pid = 0;
 	}
 	if (parent_fd < 0) return false;
-	char buffer[64];
-	ssize_t count = recv(parent_fd, buffer, sizeof(buffer), MSG_DONTWAIT);
+	unsigned char buffer[64];
+	ssize_t count = recv(parent_fd, buffer, sizeof(buffer), MSG_DONTWAIT | MSG_TRUNC);
 	if (!count || (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR))
 	{
 		stop();
@@ -253,8 +257,19 @@ bool poll(bool video_ready)
 	}
 	if (count > 0 && granted_lease)
 	{
-		// A protocol error cannot safely revoke a live writer's ownership.
-		// Keep abstaining until its descriptor closes or Main stops it.
+		// Main is the only bus writer. Never yield inside this transaction:
+		// the UI cothread can use the OSD channel between complete packets.
+		if (proxy_valid(buffer, size_t(count)))
+		{
+			DisableIO();
+			spi_uio_cmd_cont(proxy_word(buffer + 4));
+			for (unsigned i = 0; i < proxy_word(buffer + 6); ++i)
+				proxy_store(buffer + 8 + i * 2, spi_w(proxy_word(buffer + 8 + i * 2)));
+			DisableIO();
+			send(parent_fd, buffer, size_t(count), MSG_NOSIGNAL);
+		}
+		// Invalid requests never execute or end the slot lease. The client
+		// times out and remains responsible for unmapping before disconnect.
 		return false;
 	}
 	if (count > 0)
@@ -274,15 +289,16 @@ bool poll(bool video_ready)
 		return false;
 	}
 	if (!ensure_module()) return false;
-	// Main is single-threaded/cooperatively scheduled: no FPGA work may occur
-	// between this ownership flag and acknowledgment, or until disconnect.
+	// v2 grants slot ownership, never direct FPGA access. Legacy direct-bus
+	// requests are rejected above, so mixed stacks safely fall back to fb0.
+	proxied_lease = true;
 	granted_lease = true;
 	if (send(parent_fd, granted, sizeof(granted) - 1, MSG_NOSIGNAL) != (ssize_t)sizeof(granted) - 1)
 	{
 		stop();
 		return false;
 	}
-	printf("zaparoo_scanout: frontend pid=%d owns the FPGA bus\n", frontend_pid);
+	printf("zaparoo_scanout: frontend pid=%d owns slots; Main proxies FPGA transactions\n", frontend_pid);
 	return true;
 }
 }
