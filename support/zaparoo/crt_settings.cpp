@@ -11,6 +11,7 @@ static const uint32_t s_native_addr = 0x3A000000u;
 static const uint32_t s_native_size = 0x00300000u;
 static const uint32_t s_slot0_off = 0x1000u;
 static const uint32_t s_word1_magic = 0x5A50u;
+static const uint32_t s_word2_magic = 0x5A52u;
 static const size_t s_toml_max = 65536;
 
 static bool s_pattern_active = false;
@@ -213,6 +214,20 @@ bool crt_toml_set_standard(uint8_t mode)
 	return toml_set("crt_video_standard", v);
 }
 
+void crt_toml_get_hsize(int *s)
+{
+	int sv = 0;
+	toml_get_int("crt_h_size", &sv);
+	*s = clamp_int(sv, CRT_H_SIZE_MIN, CRT_H_SIZE_MAX);
+}
+
+bool crt_toml_set_hsize(int s)
+{
+	char buf[16];
+	snprintf(buf, sizeof(buf), "%d", clamp_int(s, CRT_H_SIZE_MIN, CRT_H_SIZE_MAX));
+	return toml_set("crt_h_size", buf);
+}
+
 void crt_toml_get_offsets(int *h, int *v)
 {
 	int hv = 0, vv = 0;
@@ -249,6 +264,31 @@ void crt_offsets_apply_live(int h, int v, uint8_t mode)
 	w[1] = pack_word1(h, v, mode);
 	__sync_synchronize();
 	shmem_unmap(p, 0x1000);
+}
+
+// word2: [31:16] magic 0x5A52, [15:8] reserved 0, [7:0] h size as int8.
+// See the interim contract note in crt_settings.h.
+static uint32_t pack_word2(int s)
+{
+	uint32_t sb = (uint8_t)(int8_t)clamp_int(s, CRT_H_SIZE_MIN, CRT_H_SIZE_MAX);
+	return (s_word2_magic << 16) | sb;
+}
+
+void crt_hsize_apply_live(int s)
+{
+	void *p = shmem_map(s_native_addr, 0x1000);
+	if (!p) return;
+	volatile uint32_t *w = (volatile uint32_t *)p;
+	w[2] = pack_word2(s);
+	__sync_synchronize();
+	shmem_unmap(p, 0x1000);
+}
+
+void crt_hsize_republish(void)
+{
+	int s = 0;
+	crt_toml_get_hsize(&s);
+	crt_hsize_apply_live(s);
 }
 
 static void mode_dims(uint8_t mode, int *w, int *h)
@@ -305,9 +345,14 @@ bool crt_test_pattern_publish(uint8_t mode, int h, int v)
 	hline(px, w, ht, ht / 2, w / 2 - 16, w / 2 + 16, white);
 	vline(px, w, ht, w / 2, ht / 2 - 12, ht / 2 + 12, white);
 
-	// word1 before word0: the core latches both per vblank and a non-zero
-	// word0 publishes the frame.
+	// word1/word2 before word0: the core latches them per vblank and a
+	// non-zero word0 publishes the frame.
 	words[1] = pack_word1(h, v, mode);
+	{
+		int hs = 0;
+		crt_toml_get_hsize(&hs);
+		words[2] = pack_word2(hs);
+	}
 	__sync_synchronize();
 	words[0] = (1u << 2) | 0u;
 	__sync_synchronize();
