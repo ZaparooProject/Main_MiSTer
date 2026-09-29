@@ -1,5 +1,6 @@
 #include "scanout.h"
 #include "scanout_proxy.h"
+#include "scanout_profile.h"
 #include "../../spi.h"
 #include "../../user_io.h"
 
@@ -24,7 +25,7 @@ const char request[] = "ZAPAROO-SCANOUT-2";
 const char granted[] = "ZAPAROO-SCANOUT-2 PROXY";
 const char rejected[] = "ZAPAROO-SCANOUT-2 NO";
 const char device[] = "/dev/zaparoo-scanout";
-const char module[] = "/media/fat/zaparoo/modules/6.18.38-MiSTer/zaparoo_scanout.ko";
+Profile selected_profile;
 int parent_fd = -1;
 int child_fd = -1;
 pid_t frontend_pid = 0;
@@ -81,6 +82,7 @@ bool conflicting_mappings()
 		while (fgets(line, sizeof(line), maps))
 		{
 			if (strstr(line, "/dev/mem_wc") || strstr(line, "/dev/mister-magik-scanout-slots") ||
+			    strstr(line, "/dev/mister-magik-main-window") ||
 			    strstr(line, device))
 			{
 				conflict = true;
@@ -121,15 +123,22 @@ void deny(const char *reason)
 
 bool ensure_module()
 {
-	if (device_ready()) return true;
+	if (device_ready())
+	{
+		if (loaded_profile_matches(selected_profile)) return true;
+		deny("loaded module identity mismatch");
+		return false;
+	}
 	if (loader_pid)
 	{
 		int status = 0;
 		pid_t result = waitpid(loader_pid, &status, WNOHANG);
 		if (result == loader_pid || (result < 0 && errno == ECHILD))
 		{
+			bool exited = result == loader_pid;
 			loader_pid = 0;
-			if (device_ready()) return true;
+			if (exited && WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
+			    device_ready() && loaded_profile_matches(selected_profile)) return true;
 			deny("module load failed");
 		}
 		else if (now_ms() - loader_started > 3000)
@@ -141,7 +150,8 @@ bool ensure_module()
 	}
 	if (loader_tried) return false;
 	loader_tried = true;
-	if (access(module, R_OK))
+	std::string module = selected_profile.directory + "/zaparoo_scanout.ko";
+	if (access(module.c_str(), R_OK))
 	{
 		deny("qualified kernel module missing");
 		return false;
@@ -157,7 +167,13 @@ bool ensure_module()
 	{
 		prctl(PR_SET_PDEATHSIG, SIGKILL);
 		if (getppid() != owner_pid) _exit(127);
-		execl("/sbin/insmod", "insmod", module, NULL);
+		// Keep the same open object across hashing and insmod, even if an updater
+		// replaces its directory entry. Verification stays off the poll thread.
+		int fd = open(module.c_str(), O_RDONLY | O_NOFOLLOW);
+		if (fd < 0 || !verify_module_fd(fd, selected_profile)) _exit(126);
+		char path[64];
+		snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+		execl("/sbin/insmod", "insmod", path, static_cast<char *>(NULL));
 		_exit(127);
 	}
 	return false;
@@ -186,8 +202,12 @@ void prepare(bool eligible)
 	stop();
 	owner_pid = getpid();
 	loader_tried = false;
-	struct utsname kernel;
-	if (!eligible || loader_pid || uname(&kernel) || strcmp(kernel.release, "6.18.38-MiSTer")) return;
+	if (!eligible || loader_pid) return;
+	if (!select_profile(selected_profile))
+	{
+		printf("zaparoo_scanout: fb0 fallback: no exact kernel build profile\n");
+		return;
+	}
 	int sockets[2];
 	if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0, sockets)) return;
 	parent_fd = sockets[0];
@@ -223,9 +243,10 @@ bool offered() { return parent_fd >= 0; }
 
 bool bootstrap_available()
 {
-	struct utsname kernel;
-	return !uname(&kernel) && !strcmp(kernel.release, "6.18.38-MiSTer") &&
-		(device_ready() || !access(module, R_OK));
+	Profile profile;
+	if (!select_profile(profile)) return false;
+	if (device_ready()) return loaded_profile_matches(profile);
+	return !access((profile.directory + "/zaparoo_scanout.ko").c_str(), R_OK);
 }
 
 bool blank_framebuffer()
