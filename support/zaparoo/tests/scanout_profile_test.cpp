@@ -1,4 +1,5 @@
 #include "../scanout_profile.h"
+#include "../scanout_conflict.h"
 #include <assert.h>
 #include <string>
 #include <vector>
@@ -6,6 +7,13 @@
 int main()
 {
 	using namespace zaparoo_scanout;
+	assert(internal_mapping_process(10, 10, 20, 30));
+	assert(internal_mapping_process(20, 10, 20, 30));
+	assert(internal_mapping_process(30, 10, 20, 30));
+	assert(!internal_mapping_process(40, 10, 20, 30));
+	assert(!internal_mapping_process(0, 10, 0, 0));
+	assert(!internal_mapping_process(-1, 10, 20, -1));
+	assert(!internal_mapping_process(30, 10, 20, 0));
 	Profile profile;
 	const std::string release = "6.18.38-MiSTer";
 	const std::string input = "ZAPAROO-SCANOUT-PROFILE-1\n" + release + "\n" +

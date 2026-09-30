@@ -1,6 +1,7 @@
 #include "scanout.h"
 #include "scanout_proxy.h"
 #include "scanout_profile.h"
+#include "scanout_conflict.h"
 #include "../../spi.h"
 #include "../../user_io.h"
 
@@ -69,7 +70,7 @@ bool conflicting_mappings()
 	{
 		char *end;
 		long pid = strtol(entry->d_name, &end, 10);
-		if (!pid || *end || pid == getpid() || pid == frontend_pid) continue;
+		if (!pid || *end || internal_mapping_process(pid, getpid(), frontend_pid, loader_pid)) continue;
 		char path[80];
 		snprintf(path, sizeof(path), "/proc/%ld/maps", pid);
 		FILE *maps = fopen(path, "re");
