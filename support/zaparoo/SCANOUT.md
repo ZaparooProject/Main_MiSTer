@@ -7,10 +7,10 @@ without yielding inside a transaction. Its OSD, input and video queries can run
 between packets. Do not remove `fpga_io.cpp`'s direct-owner guards or grant access
 merely because an offer was exported or the child passed `--latch`.
 
-Initial eligibility is HDMI (not Direct Video), exact release string
-`6.18.38-MiSTer`. Frontend finishes vmode/output probes before requesting access.
+Initial eligibility is HDMI (not Direct Video), with a profile matching both
+the running kernel release and its GNU build ID. Frontend finishes vmode/output probes before requesting access.
 Main waits for `finalize_spawn`, checks active mapping conflicts, optionally loads
-`/media/fat/zaparoo/modules/6.18.38-MiSTer/zaparoo_scanout.ko`, then acknowledges
+`/media/fat/zaparoo/modules/<release>/<kernel-build-id>/zaparoo_scanout.ko`, then acknowledges
 `ZAPAROO-SCANOUT-2` with `ZAPAROO-SCANOUT-2 PROXY` over the inherited
 `SOCK_SEQPACKET` channel. Unknown kernels/native CRT receive no offer. Both old
 Main/new frontend and new Main/old direct-MMIO frontend reject the mismatched
@@ -47,3 +47,24 @@ framing and proxy validation: compile with the same cross-g++ (`-std=c++14
 with host GCC or modify the Makefile. The Menu fork's
 `kernel/scanout-slots/README.md` records module provenance/qualification limits.
 Local builds do not authorize deployment, force-loading or release-channel changes.
+
+## Kernel profiles
+
+`scanout_profile.cpp` reads the bounded ELF note stream from `/sys/kernel/notes`
+and the seven-line `profile` file beside the selected module. The format is:
+magic `ZAPAROO-SCANOUT-PROFILE-1`, release, kernel build ID, module build ID,
+module SHA-256, kernel source revision, and `zaparoo-scanout-v1-1080p`, each
+followed by a newline. Hex values are lowercase; no extra fields are accepted.
+
+Module hashing runs in the asynchronous loader child using `sha256sum`; hashing
+and insmod share an open file descriptor so renaming a package during update
+does not substitute a different object. The existing loader timeout bounds both
+steps. Before granting ownership, including when a device already exists, Main
+checks `/sys/module/zaparoo_scanout/notes/.note.gnu.build-id`. A mismatch fails
+back to fb0 and never unloads or force-loads anything. Missing SHA-256 tooling
+also fails closed. These checks detect incompatible or damaged installations;
+they do not authenticate packages against a privileged attacker.
+
+MagiK's Main-window mapping device participates in the existing conflict check.
+The Zaparoo module ABI, slot addresses, UIO protocol and ownership lifecycle
+remain unchanged. Unknown builds and old flat module layouts receive no offer.
