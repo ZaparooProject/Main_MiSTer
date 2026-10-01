@@ -228,6 +228,20 @@ bool crt_toml_set_hsize(int s)
 	return toml_set("crt_h_size", buf);
 }
 
+void crt_toml_get_vsize(int *s)
+{
+	int sv = 0;
+	toml_get_int("crt_v_size", &sv);
+	*s = clamp_int(sv, CRT_V_SIZE_MIN, CRT_V_SIZE_MAX);
+}
+
+bool crt_toml_set_vsize(int s)
+{
+	char buf[16];
+	snprintf(buf, sizeof(buf), "%d", clamp_int(s, CRT_V_SIZE_MIN, CRT_V_SIZE_MAX));
+	return toml_set("crt_v_size", buf);
+}
+
 void crt_toml_get_offsets(int *h, int *v)
 {
 	int hv = 0, vv = 0;
@@ -266,29 +280,31 @@ void crt_offsets_apply_live(int h, int v, uint8_t mode)
 	shmem_unmap(p, 0x1000);
 }
 
-// word2: [31:16] magic 0x5A52, [15:8] reserved 0, [7:0] h size as int8.
+// word2: [31:16] magic 0x5A52, [15:8] v size as int8, [7:0] h size as int8.
 // See the interim contract note in crt_settings.h.
-static uint32_t pack_word2(int s)
+static uint32_t pack_word2(int h, int v)
 {
-	uint32_t sb = (uint8_t)(int8_t)clamp_int(s, CRT_H_SIZE_MIN, CRT_H_SIZE_MAX);
-	return (s_word2_magic << 16) | sb;
+	uint32_t hb = (uint8_t)(int8_t)clamp_int(h, CRT_H_SIZE_MIN, CRT_H_SIZE_MAX);
+	uint32_t vb = (uint8_t)(int8_t)clamp_int(v, CRT_V_SIZE_MIN, CRT_V_SIZE_MAX);
+	return (s_word2_magic << 16) | (vb << 8) | hb;
 }
 
-void crt_hsize_apply_live(int s)
+void crt_size_apply_live(int h_size, int v_size)
 {
 	void *p = shmem_map(s_native_addr, 0x1000);
 	if (!p) return;
 	volatile uint32_t *w = (volatile uint32_t *)p;
-	w[2] = pack_word2(s);
+	w[2] = pack_word2(h_size, v_size);
 	__sync_synchronize();
 	shmem_unmap(p, 0x1000);
 }
 
-void crt_hsize_republish(void)
+void crt_size_republish(void)
 {
-	int s = 0;
-	crt_toml_get_hsize(&s);
-	crt_hsize_apply_live(s);
+	int h = 0, v = 0;
+	crt_toml_get_hsize(&h);
+	crt_toml_get_vsize(&v);
+	crt_size_apply_live(h, v);
 }
 
 static void mode_dims(uint8_t mode, int *w, int *h)
@@ -349,9 +365,10 @@ bool crt_test_pattern_publish(uint8_t mode, int h, int v)
 	// non-zero word0 publishes the frame.
 	words[1] = pack_word1(h, v, mode);
 	{
-		int hs = 0;
+		int hs = 0, vs = 0;
 		crt_toml_get_hsize(&hs);
-		words[2] = pack_word2(hs);
+		crt_toml_get_vsize(&vs);
+		words[2] = pack_word2(hs, vs);
 	}
 	__sync_synchronize();
 	words[0] = (1u << 2) | 0u;
