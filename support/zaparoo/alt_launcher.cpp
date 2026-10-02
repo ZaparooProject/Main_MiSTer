@@ -1,6 +1,7 @@
 #include "alt_launcher.h"
 #include "scanout.h"
 #include "bootstrap.h"
+#include "launcher_handoff.h"
 #include "crt_settings.h"
 #include "launcher_input_metadata.h"
 #include "settings.h"
@@ -763,8 +764,7 @@ static void finalize_spawn(bool tty_ready)
 	s_tty_deadline = 0;
 	bool vt_ok = switch_to_vt(s_vt);
 	zlog("finalize: tty_ready=%d vt_active=%d fb_state=%d", tty_ready, vt_ok, video_fb_state());
-	if (!s_native_crt)
-	{
+	zaparoo_launcher::handoff(s_native_crt, [] {
 		// The frontend configures /dev/fb0 before Qt starts. Only publish its
 		// existing buffer here; rewriting the mode after Qt has painted clears
 		// the frame and leaves black until each region becomes dirty again.
@@ -775,9 +775,7 @@ static void finalize_spawn(bool tty_ready)
 		s_hdmi_fb_reasserts_remaining = 5;
 		s_hdmi_fb_reassert_timer = GetTimer(1000);
 		if (!s_hdmi_fb_reassert_timer) s_hdmi_fb_reassert_timer = 1;
-	}
-	else
-		input_switch(0);
+	}, input_switch);
 
 	// The frontend grabs input as soon as it starts. If the OSD is still
 	// up (e.g. user toggled CRT mode or hit Reboot from System Settings),
