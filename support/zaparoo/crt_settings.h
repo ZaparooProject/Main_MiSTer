@@ -29,11 +29,6 @@
 #define CRT_H_SIZE_MIN -8
 #define CRT_H_SIZE_MAX  2
 
-// Vertical size (shrink only): -N adds N blank lines per progressive frame,
-// lowering the frame rate (262+N / 312+N lines). 480i forces 0 in RTL.
-#define CRT_V_SIZE_MIN -32
-#define CRT_V_SIZE_MAX  0
-
 const char *crt_standard_name(uint8_t mode);
 uint8_t crt_standard_next(uint8_t mode);
 
@@ -44,8 +39,6 @@ void crt_toml_get_offsets(int *h, int *v);
 bool crt_toml_set_offsets(int h, int v);
 void crt_toml_get_hsize(int *s);
 bool crt_toml_set_hsize(int s);
-void crt_toml_get_vsize(int *s);
-bool crt_toml_set_vsize(int s);
 
 // Live centering: rewrites DDR control word1. Only meaningful while the
 // menu core is scanning a published frame (frontend --crt or the test
@@ -55,8 +48,7 @@ void crt_offsets_apply_live(int h, int v, uint8_t mode);
 // Interim word2 contract (analog H size). The core's per-vblank control
 // poll reads two 64-bit beats at 0x3A000000: beat 1 is the unchanged v2
 // word0/word1 (magics 0x5A50/0x5A51); beat 2's low word ("word2", bytes
-// 0x08-0x0B) is [31:16] magic 0x5A52, [15:8] signed v_size (-32..0, -N
-// adds N blank lines per progressive frame, 480i forces 0), [7:0] signed
+// 0x08-0x0B) is [31:16] magic 0x5A52, [15:8] reserved 0, [7:0] signed
 // h_size (core-clamped to -8..+2; anything without the magic reads as 0).
 // Word2 is written ONLY by Main (this page's live apply, the test pattern,
 // and a republish after alt_launcher's pre-spawn 3 MB blank); the frontend
@@ -64,8 +56,8 @@ void crt_offsets_apply_live(int h, int v, uint8_t mode);
 // h_size applies only while word1's magic is valid. The deferred v3 plan
 // (plans/menu-crt-video-plan.md sec. 7) repurposes byte 0x08 and moves
 // 0x5A52 into word1; matched releases will replace this layout wholesale.
-void crt_size_apply_live(int h_size, int v_size);
-void crt_size_republish(void);
+void crt_hsize_apply_live(int s);
+void crt_hsize_republish(void);
 
 // Main-drawn alignment pattern published into DDR slot 0 so centering can
 // be adjusted without a running frontend. unpublish returns the core to
