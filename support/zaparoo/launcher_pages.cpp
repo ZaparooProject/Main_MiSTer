@@ -229,15 +229,25 @@ void position_page_leave(void)
 		crt_test_pattern_unpublish();
 		s_pattern = crt_test_pattern_active();
 	}
+	bool size_changed = false;
 	if (s_size != s_size0)
 	{
-		// Size needs no respawn: the frontend never reads, caches, or writes
-		// crt_h_size (or DDR bytes >= 8), so the live word2 write plus this
-		// TOML save is already complete.
-		if (crt_toml_set_hsize(s_size)) s_size0 = s_size;
+		// The frontend owns crt_h_size the same way it owns the offsets
+		// (it caches the value at start and writes word2 live), so a
+		// save here must respawn it below or the frontend would write
+		// the old size back on its next settings save.
+		if (crt_toml_set_hsize(s_size))
+		{
+			s_size0 = s_size;
+			size_changed = true;
+		}
 		else printf("launcher_pages: h size not saved\n");
 	}
-	if (s_h == s_h0 && s_v == s_v0) return;
+	if (s_h == s_h0 && s_v == s_v0)
+	{
+		if (size_changed && alt_launcher_active()) alt_launcher_respawn();
+		return;
+	}
 	if (!crt_toml_set_offsets(s_h, s_v))
 	{
 		printf("launcher_pages: offsets not saved, frontend left running\n");

@@ -50,9 +50,11 @@ void crt_offsets_apply_live(int h, int v, uint8_t mode);
 // word0/word1 (magics 0x5A50/0x5A51); beat 2's low word ("word2", bytes
 // 0x08-0x0B) is [31:16] magic 0x5A52, [15:8] reserved 0, [7:0] signed
 // h_size (core-clamped to -8..+2; anything without the magic reads as 0).
-// Word2 is written ONLY by Main (this page's live apply, the test pattern,
-// and a republish after alt_launcher's pre-spawn 3 MB blank); the frontend
-// never writes bytes >= 8, so the value survives its word0/word1 publishes.
+// Word2 ownership matches word1's offsets: a running frontend owns it (it
+// writes the saved h_size at arm and on live calibration nudges, v byte 0),
+// and Main writes it from this page's live apply, the test pattern, and a
+// republish after alt_launcher's pre-spawn 3 MB blank. Main's OSD save
+// respawns the frontend so the two writers never run stale side by side.
 // h_size applies only while word1's magic is valid. The deferred v3 plan
 // (plans/menu-crt-video-plan.md sec. 7) repurposes byte 0x08 and moves
 // 0x5A52 into word1; matched releases will replace this layout wholesale.
