@@ -1,0 +1,326 @@
+#include "scanout.h"
+#include "scanout_proxy.h"
+#include "scanout_profile.h"
+#include "scanout_conflict.h"
+#include "../../spi.h"
+#include "../../user_io.h"
+
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/prctl.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+namespace zaparoo_scanout {
+namespace {
+const char request[] = "ZAPAROO-SCANOUT-2";
+const char granted[] = "ZAPAROO-SCANOUT-2 PROXY";
+const char rejected[] = "ZAPAROO-SCANOUT-2 NO";
+const char device[] = "/dev/zaparoo-scanout";
+Profile selected_profile;
+int parent_fd = -1;
+int child_fd = -1;
+pid_t frontend_pid = 0;
+pid_t owner_pid = 0;
+pid_t loader_pid = 0;
+bool requested = false;
+bool granted_lease = false;
+bool proxied_lease = false;
+bool loader_tried = false;
+unsigned long long loader_started = 0;
+
+unsigned long long now_ms()
+{
+	struct timespec ts = {};
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (unsigned long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+void close_fd(int &fd)
+{
+	if (fd >= 0) close(fd);
+	fd = -1;
+}
+
+bool device_ready()
+{
+	struct stat st;
+	return !stat(device, &st) && S_ISCHR(st.st_mode) && !access(device, R_OK | W_OK);
+}
+
+// Raw WC mappers do not participate in request_mem_region_exclusive. Check
+// active clients, not merely loaded module names. This is cooperative conflict
+// avoidance, not protection against a privileged process racing a new mapping.
+bool conflicting_mappings()
+{
+	DIR *dir = opendir("/proc");
+	if (!dir) return true;
+	bool conflict = false;
+	struct dirent *entry;
+	while (!conflict && (entry = readdir(dir)))
+	{
+		char *end;
+		long pid = strtol(entry->d_name, &end, 10);
+		if (!pid || *end || internal_mapping_process(pid, getpid(), frontend_pid, loader_pid)) continue;
+		char path[80];
+		snprintf(path, sizeof(path), "/proc/%ld/maps", pid);
+		FILE *maps = fopen(path, "re");
+		if (!maps)
+		{
+			if (errno != ENOENT && errno != ESRCH) conflict = true;
+			continue;
+		}
+		char line[2048];
+		while (fgets(line, sizeof(line), maps))
+		{
+			if (strstr(line, "/dev/mem_wc") || strstr(line, "/dev/mister-magik-scanout-slots") ||
+			    strstr(line, "/dev/mister-magik-main-window") ||
+			    strstr(line, device))
+			{
+				conflict = true;
+				break;
+			}
+			if (strstr(line, "/dev/mem"))
+			{
+				unsigned long long start, end_addr, offset;
+				if (sscanf(line, "%llx-%llx %*4s %llx", &start, &end_addr, &offset) != 3 ||
+				    end_addr < start || offset + (end_addr - start) < offset)
+				{
+					conflict = true;
+					break;
+				}
+				unsigned long long limit = offset + end_addr - start;
+				if (offset < 0x23800000ULL && limit > 0x23000000ULL)
+				{
+					conflict = true;
+					break;
+				}
+			}
+		}
+		if (ferror(maps)) conflict = true;
+		fclose(maps);
+	}
+	closedir(dir);
+	return conflict;
+}
+
+void deny(const char *reason)
+{
+	printf("zaparoo_scanout: fb0 fallback: %s\n", reason);
+	if (parent_fd >= 0) send(parent_fd, rejected, sizeof(rejected) - 1, MSG_NOSIGNAL);
+	close_fd(parent_fd);
+	requested = false;
+	granted_lease = false;
+}
+
+bool ensure_module()
+{
+	if (device_ready())
+	{
+		if (loaded_profile_matches(selected_profile)) return true;
+		deny("loaded module identity mismatch");
+		return false;
+	}
+	if (loader_pid)
+	{
+		int status = 0;
+		pid_t result = waitpid(loader_pid, &status, WNOHANG);
+		if (result == loader_pid || (result < 0 && errno == ECHILD))
+		{
+			bool exited = result == loader_pid;
+			loader_pid = 0;
+			if (exited && WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
+			    device_ready() && loaded_profile_matches(selected_profile)) return true;
+			deny("module load failed");
+		}
+		else if (now_ms() - loader_started > 3000)
+		{
+			kill(loader_pid, SIGKILL);
+			deny("module load timed out");
+		}
+		return false;
+	}
+	if (loader_tried) return false;
+	loader_tried = true;
+	std::string module = selected_profile.directory + "/zaparoo_scanout.ko";
+	if (access(module.c_str(), R_OK))
+	{
+		deny("qualified kernel module missing");
+		return false;
+	}
+	loader_started = now_ms();
+	loader_pid = fork();
+	if (loader_pid < 0)
+	{
+		loader_pid = 0;
+		deny("module loader fork failed");
+	}
+	else if (!loader_pid)
+	{
+		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (getppid() != owner_pid) _exit(127);
+		// Keep the same open object across hashing and insmod, even if an updater
+		// replaces its directory entry. Verification stays off the poll thread.
+		int fd = open(module.c_str(), O_RDONLY | O_NOFOLLOW);
+		if (fd < 0 || !verify_module_fd(fd, selected_profile)) _exit(126);
+		char path[64];
+		snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+		execl("/sbin/insmod", "insmod", path, static_cast<char *>(NULL));
+		_exit(127);
+	}
+	return false;
+}
+}
+
+void stop()
+{
+	close_fd(parent_fd);
+	close_fd(child_fd);
+	frontend_pid = 0;
+	requested = false;
+	granted_lease = false;
+	proxied_lease = false;
+	if (loader_pid)
+	{
+		kill(loader_pid, SIGKILL);
+		int status;
+		pid_t result = waitpid(loader_pid, &status, WNOHANG);
+		if (result == loader_pid || (result < 0 && errno == ECHILD)) loader_pid = 0;
+	}
+}
+
+void prepare(bool eligible)
+{
+	stop();
+	owner_pid = getpid();
+	loader_tried = false;
+	if (!eligible || loader_pid) return;
+	if (!select_profile(selected_profile))
+	{
+		printf("zaparoo_scanout: fb0 fallback: no exact kernel build profile\n");
+		return;
+	}
+	int sockets[2];
+	if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0, sockets)) return;
+	parent_fd = sockets[0];
+	child_fd = sockets[1];
+}
+
+void child_environment()
+{
+	if (getppid() != owner_pid) _exit(1);
+	unsetenv("ZAPAROO_SCANOUT_FD");
+	close_fd(parent_fd);
+	if (child_fd < 0) return;
+	int flags = fcntl(child_fd, F_GETFD);
+	if (flags < 0 || fcntl(child_fd, F_SETFD, flags & ~FD_CLOEXEC))
+	{
+		close_fd(child_fd);
+		return;
+	}
+	char value[24];
+	snprintf(value, sizeof(value), "%d", child_fd);
+	setenv("ZAPAROO_SCANOUT_FD", value, 1);
+}
+
+void parent_started(pid_t pid)
+{
+	close_fd(child_fd);
+	frontend_pid = pid;
+}
+
+bool owned() { return granted_lease; }
+bool bus_owned() { return granted_lease && !proxied_lease; }
+bool offered() { return parent_fd >= 0; }
+
+bool bootstrap_available()
+{
+	Profile profile;
+	if (!select_profile(profile)) return false;
+	if (device_ready()) return loaded_profile_matches(profile);
+	return !access((profile.directory + "/zaparoo_scanout.ko").c_str(), R_OK);
+}
+
+bool blank_framebuffer()
+{
+	if (granted_lease) return false;
+	DisableIO();
+	int supported = spi_uio_cmd_cont(UIO_SET_FBUF);
+	spi_w(0);
+	DisableIO();
+	return supported != 0;
+}
+
+bool poll(bool video_ready)
+{
+	// Reap our own loader even when a denied/disconnected request is gone.
+	if (loader_pid && (parent_fd < 0 || granted_lease))
+	{
+		int status;
+		pid_t result = waitpid(loader_pid, &status, WNOHANG);
+		if (result == loader_pid || (result < 0 && errno == ECHILD)) loader_pid = 0;
+	}
+	if (parent_fd < 0) return false;
+	unsigned char buffer[64];
+	ssize_t count = recv(parent_fd, buffer, sizeof(buffer), MSG_DONTWAIT | MSG_TRUNC);
+	if (!count || (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR))
+	{
+		stop();
+		return false;
+	}
+	if (count > 0 && granted_lease)
+	{
+		// Main is the only bus writer. Never yield inside this transaction:
+		// the UI cothread can use the OSD channel between complete packets.
+		if (proxy_valid(buffer, size_t(count)))
+		{
+			DisableIO();
+			spi_uio_cmd_cont(proxy_word(buffer + 4));
+			for (unsigned i = 0; i < proxy_word(buffer + 6); ++i)
+				proxy_store(buffer + 8 + i * 2, spi_w(proxy_word(buffer + 8 + i * 2)));
+			DisableIO();
+			send(parent_fd, buffer, size_t(count), MSG_NOSIGNAL);
+		}
+		// Invalid requests never execute or end the slot lease. The client
+		// times out and remains responsible for unmapping before disconnect.
+		return false;
+	}
+	if (count > 0)
+	{
+		if (requested || count != (ssize_t)sizeof(request) - 1 ||
+		    memcmp(buffer, request, sizeof(request) - 1))
+		{
+			deny("invalid ownership request");
+			return false;
+		}
+		requested = true;
+	}
+	if (!requested || granted_lease || !video_ready) return false;
+	if (conflicting_mappings())
+	{
+		deny("another physical-memory client is active");
+		return false;
+	}
+	if (!ensure_module()) return false;
+	// v2 grants slot ownership, never direct FPGA access. Legacy direct-bus
+	// requests are rejected above, so mixed stacks safely fall back to fb0.
+	proxied_lease = true;
+	granted_lease = true;
+	if (send(parent_fd, granted, sizeof(granted) - 1, MSG_NOSIGNAL) != (ssize_t)sizeof(granted) - 1)
+	{
+		stop();
+		return false;
+	}
+	printf("zaparoo_scanout: frontend pid=%d owns slots; Main proxies FPGA transactions\n", frontend_pid);
+	return true;
+}
+}

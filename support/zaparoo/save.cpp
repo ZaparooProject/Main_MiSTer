@@ -1,5 +1,6 @@
 #include "save.h"
 #include "confstr.h"
+#include "core_watchdog.h"
 #include "kiosk.h"
 #include "settings.h"
 
@@ -349,6 +350,7 @@ void zaparoo_save_note_write(void)
 
 void zaparoo_poll(void)
 {
+	zaparoo_core_watchdog_poll();
 	zaparoo_kiosk_poll();
 
 	switch (s_state)

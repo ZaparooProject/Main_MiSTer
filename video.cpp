@@ -19,6 +19,7 @@
 #include "file_io.h"
 #include "mat4x4.h"
 #include "menu.h"
+#include "osd.h"
 #include "video.h"
 #include "input.h"
 #include "shmem.h"
@@ -3475,6 +3476,7 @@ static void fb_write_module_params()
 static void video_fb_set(int enable, int n, int update_module)
 {
 	PROFILE_FUNCTION();
+	if (alt_launcher_blank_framebuffer()) return;
 
 	if (fb_base)
 	{
@@ -3539,7 +3541,7 @@ static void video_fb_set(int enable, int n, int update_module)
 
 		DisableIO();
 		if (cfg.direct_video) set_vga_fb(enable);
-		if (is_menu()) user_io_status_set("[8:5]", (fb_enabled && !fb_num) ? 0x160 : 0);
+		if (is_menu()) user_io_status_set("[8:5]", (fb_enabled && !fb_num) ? 0xB : 0);
 	}
 }
 
@@ -3946,6 +3948,8 @@ void video_menu_bg(int n, int idle)
 		cached_idle = idle;
 	}
 
+	if (alt_launcher_hide_framebuffer() || alt_launcher_scanout_active()) return;
+
 	if (n)
 	{
 		//printf("**** BG DEBUG START ****\n");
@@ -3973,10 +3977,11 @@ void video_menu_bg(int n, int idle)
 					vs_wait();
 				};
 
-				if (cfg.osd_rotate)
+				int rot = OsdGetRotation(true);
+				if (rot)
 				{
 					imlib_context_set_image(logo);
-					imlib_image_orientate(cfg.osd_rotate == 1 ? 3 : 1);
+					imlib_image_orientate(rot == 1 ? 3 : 1);
 				}
 			}
 			else
@@ -4080,11 +4085,12 @@ void video_menu_bg(int n, int idle)
 
 			int dst_w, dst_h;
 			int dst_x, dst_y;
-			if (cfg.osd_rotate)
+			int rot = OsdGetRotation(true);
+			if (rot)
 			{
 				dst_h = height / 2;
 				dst_w = src_w * dst_h / src_h;
-				if (cfg.osd_rotate == 1)
+				if (rot == 1)
 				{
 					dst_x = brd_x;
 					dst_y = height - dst_h;
@@ -4220,7 +4226,7 @@ int video_chvt(int num)
 
 void video_cmd(char *cmd)
 {
-	if (video_fb_state())
+	if (!alt_launcher_scanout_active() && (video_fb_state() || alt_launcher_hide_framebuffer()))
 	{
 		int accept = 0;
 		int fmt = 0, rb = 0, div = -1, width = -1, height = -1;
@@ -4335,6 +4341,9 @@ void video_cmd(char *cmd)
 				yoff = v_cur.item[8] - FB_DV_UBRD;
 			}
 
+			// Startup probes update geometry without revealing the Linux console.
+			if (!alt_launcher_hide_framebuffer())
+			{
 			spi_uio_cmd_cont(UIO_SET_FBUF);
 			spi_w(FB_EN | sc_fmt); // format, enable flag
 			spi_w((uint16_t)addr); // base address low word
@@ -4347,6 +4356,7 @@ void video_cmd(char *cmd)
 			spi_w(yoff + vmax);    // scaled bottom
 			spi_w(stride);         // stride
 			DisableIO();
+			}
 
 			if (cmd[6] != '2')
 			{

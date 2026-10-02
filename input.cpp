@@ -37,6 +37,7 @@
 #include "scaler.h"
 #include "file_io.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/command_stream.h"
 #include "support/zaparoo/launcher_input_metadata.h"
 
 #define NUMDEV 30
@@ -2767,11 +2768,12 @@ static void update_num_hw(int dev, int num)
 			led_path = get_led_path(dev);
 			if (led_path)
 			{
-				set_led(led_path, ":home", num ? 1 : 15);
-				set_led(led_path, ":player1", (num == 0 || num == 1 || num == 5));
-				set_led(led_path, ":player2", (num == 0 || num == 2 || num == 6));
-				set_led(led_path, ":player3", (num == 0 || num == 3));
-				set_led(led_path, ":player4", (num == 0 || num == 4 || num == 5 || num == 6));
+				// 5.15 names first, then the mainline hid-nintendo names used by 6.18
+				if (!set_led(led_path, ":home", num ? 1 : 15)) set_led(led_path, ":blue:player-5", num ? 1 : 15);
+				if (!set_led(led_path, ":player1", (num == 0 || num == 1 || num == 5))) set_led(led_path, ":green:player-1", (num == 0 || num == 1 || num == 5));
+				if (!set_led(led_path, ":player2", (num == 0 || num == 2 || num == 6))) set_led(led_path, ":green:player-2", (num == 0 || num == 2 || num == 6));
+				if (!set_led(led_path, ":player3", (num == 0 || num == 3))) set_led(led_path, ":green:player-3", (num == 0 || num == 3));
+				if (!set_led(led_path, ":player4", (num == 0 || num == 4 || num == 5 || num == 6))) set_led(led_path, ":green:player-4", (num == 0 || num == 4 || num == 5 || num == 6));
 			}
 
 			if (repeat && JOYCON_COMBINED(dev)) dev = input[dev].bind; else break;
@@ -5352,7 +5354,7 @@ int input_test(int getchar)
 
 						if (input[n].vid == 0x057e)
 						{
-							if (strstr(input[n].name, " IMU"))
+							if (strstr(input[n].name, " IMU") || strstr(input[n].name, "(IMU)"))
 							{
 								// don't use Accelerometer
 								close(pool[n].fd);
@@ -5628,7 +5630,8 @@ int input_test(int getchar)
 	if (state == 2)
 	{
 		int timeout = 0;
-		if (is_menu() && (video_fb_state() || alt_launcher_active())) timeout = 25;
+		if (is_menu() && !alt_launcher_scanout_active() && (video_fb_state() || alt_launcher_active())) timeout = 25;
+		const unsigned long launcher_drain_deadline = GetTimer(4);
 
 		while (1)
 		{
@@ -5902,7 +5905,7 @@ int input_test(int getchar)
 									}
 								}
 
-								if (is_menu() && !video_fb_state())
+								if (is_menu() && !video_fb_state() && !alt_launcher_active())
 								{
 									/*
 									if (mapping && mapping_type <= 1 && !(ev.type==EV_KEY && ev.value>1))
@@ -6129,7 +6132,7 @@ int input_test(int getchar)
 										pai = &absinfo;
 										int range = absinfo.maximum - absinfo.minimum + 1;
 										int center = absinfo.minimum + (range / 2);
-										int treshold = range / 4;
+										int treshold = (range * cfg.dpad_threshold) / 200;
 
 										int only_max = 1;
 										for (int n = 0; n < 4; n++) if (input[dev].mmap[SYS_AXIS1_X + n] && ((input[dev].mmap[SYS_AXIS1_X + n] & 0xFFFF) == ev.code)) only_max = 0;
@@ -6262,10 +6265,10 @@ int input_test(int getchar)
 			{
 				static char cmd[1024];
 				int len = read(pool[NUMDEV + 1].fd, cmd, sizeof(cmd) - 1);
-				if (len)
+				if (len > 0)
 				{
-					if (cmd[len - 1] == '\n') cmd[len - 1] = 0;
-					cmd[len] = 0;
+					static ZaparooCommandStream stream;
+					stream.feed(cmd, size_t(len), [](char *cmd) {
 					printf("MiSTer_cmd: %s\n", cmd);
 					if (!strncmp(cmd, "zaparoo_", 8)) zaparoo_command(cmd);
 					else if (!strncmp(cmd, "fb_cmd", 6)) video_cmd(cmd);
@@ -6299,6 +6302,7 @@ int input_test(int getchar)
 						else if (!strcmp(cmd + 7, "unmute")) set_volume(0x80);
 						else if (cmd[7] >= '0' && cmd[7] <= '7') set_volume(0x40 - 0x30 + cmd[7]);
 					}
+					});
 				}
 			}
 
@@ -6315,6 +6319,9 @@ int input_test(int getchar)
 				// UI cothread starves.
 				if (return_value == 1) break;
 			}
+			// Noisy pads may never leave 25 ms of silence. Give the launcher's
+			// UI, video setup, and child supervision a turn even under input load.
+			if (alt_launcher_active() && CheckTimer(launcher_drain_deadline)) break;
 		}
 
 		if (cur_leds != leds_state)
