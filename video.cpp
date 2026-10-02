@@ -19,6 +19,7 @@
 #include "file_io.h"
 #include "mat4x4.h"
 #include "menu.h"
+#include "osd.h"
 #include "video.h"
 #include "input.h"
 #include "shmem.h"
@@ -3540,7 +3541,7 @@ static void video_fb_set(int enable, int n, int update_module)
 
 		DisableIO();
 		if (cfg.direct_video) set_vga_fb(enable);
-		if (is_menu()) user_io_status_set("[8:5]", (fb_enabled && !fb_num) ? 0x160 : 0);
+		if (is_menu()) user_io_status_set("[8:5]", (fb_enabled && !fb_num) ? 0xB : 0);
 	}
 }
 
@@ -3976,10 +3977,11 @@ void video_menu_bg(int n, int idle)
 					vs_wait();
 				};
 
-				if (cfg.osd_rotate)
+				int rot = OsdGetRotation(true);
+				if (rot)
 				{
 					imlib_context_set_image(logo);
-					imlib_image_orientate(cfg.osd_rotate == 1 ? 3 : 1);
+					imlib_image_orientate(rot == 1 ? 3 : 1);
 				}
 			}
 			else
@@ -4083,11 +4085,12 @@ void video_menu_bg(int n, int idle)
 
 			int dst_w, dst_h;
 			int dst_x, dst_y;
-			if (cfg.osd_rotate)
+			int rot = OsdGetRotation(true);
+			if (rot)
 			{
 				dst_h = height / 2;
 				dst_w = src_w * dst_h / src_h;
-				if (cfg.osd_rotate == 1)
+				if (rot == 1)
 				{
 					dst_x = brd_x;
 					dst_y = height - dst_h;
