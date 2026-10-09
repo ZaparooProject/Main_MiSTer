@@ -3517,6 +3517,10 @@ void HandleUI(void)
 				execl("/sbin/agetty", "/sbin/agetty",  "-a", "root", "-l", "/tmp/script", "--nohostname", "-L", "tty2", "linux", NULL);
 				exit(1); //should never be reached
 			}
+			// Zaparoo: a failed fork leaves no viewer to wait for. Zero reads as one
+			// that already exited cleanly, so the next pass closes up and resumes
+			// the frontend instead of waiting on pid -1 with it suspended.
+			if (ttypid < 0) ttypid = 0;
 		} else {
 			menustate = MENU_DOC_NO_FBTERM;
 		}
