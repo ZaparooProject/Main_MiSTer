@@ -117,12 +117,23 @@ void input_export_launcher_metadata(void)
 // touchpad code and the d-pad still works: exactly "d-pad moves, buttons dead"
 // from beta testing, and the result is cached by vid/pid, so one wrong probe
 // poisons every later rescan. Prefer the group's gamepad node.
+//
+// The same holds for any pad whose receiver also exposes keyboard or mouse
+// interfaces: the pre-warm below probes through the merge base, which is only
+// the first of the group's nodes in scan order and need not be the gamepad.
 static int zaparoo_gcdb_probe_dev(int dev, int sub_dev)
 {
-	if (input[sub_dev].quirk != QUIRK_DS4TOUCH) return sub_dev;
+	if (input[sub_dev].quirk == QUIRK_DS4TOUCH)
+	{
+		for (int i = 0; i < NUMDEV; i++)
+		{
+			if (i != sub_dev && pool[i].fd >= 0 && input[i].bind == dev && input[i].quirk == QUIRK_DS4) return i;
+		}
+	}
+	if (zaparoo_is_gamepad_dev(sub_dev)) return sub_dev;
 	for (int i = 0; i < NUMDEV; i++)
 	{
-		if (i != sub_dev && pool[i].fd >= 0 && input[i].bind == dev && input[i].quirk == QUIRK_DS4) return i;
+		if (i != sub_dev && pool[i].fd >= 0 && input[i].bind == dev && input[i].quirk != QUIRK_DS4TOUCH && zaparoo_is_gamepad_dev(i)) return i;
 	}
 	return sub_dev;
 }
