@@ -44,6 +44,7 @@
 #include "support.h"
 #include "support/zaparoo/active_game.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/menu_bg.h"
 #include "support/zaparoo/menu_rbf.h"
 
 static char core_path[1024] = {};
@@ -1632,6 +1633,7 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
+				zaparoo_menu_bg_init();
 				zaparoo_native_video_release();
 				if (alt_launcher_configured())
 				{

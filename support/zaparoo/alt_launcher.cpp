@@ -863,6 +863,11 @@ bool alt_launcher_owns_screen(void)
 	return s_pid != 0 || s_init_pending || s_respawn_timer != 0;
 }
 
+bool alt_launcher_menu_snow_allowed(void)
+{
+	return !alt_launcher_owns_screen() && !s_resume_after_script;
+}
+
 bool alt_launcher_console_lease_active(void)
 {
 	return s_console_lease;
