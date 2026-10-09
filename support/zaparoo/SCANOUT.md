@@ -19,7 +19,12 @@ handshake and fall back to fb0. Kernel ABI and FPGA scanout commands are unchang
 Each subsequent packet contains little-endian u16 magic `0x5A52`, sequence,
 command, count and words. Only SET (`0x57`, 12 words), CAPS (`0x59`, 6 words), and
 RECEIPT (`0x5B`, 11 words) are accepted. Replies echo the header and replace words
-with SPI responses. Invalid shapes never execute; a frontend deadline prevents
+with SPI responses. RASTER (`0x0100`, 2 words) is answered by Main and never
+reaches the bus: it returns the width and height of the scaler raster a SET
+destination is expressed in. A pixel-repeated mode such as `video_mode=14` keeps
+its logical 1280x1440 raster there, which no vmode readback reveals. Main
+advertises it with `ZAPAROO_SCANOUT_RASTER=1` in the child environment, so a
+frontend never sends it to a Main that would ignore it. Invalid shapes never execute; a frontend deadline prevents
 an unresponsive Main from blocking it indefinitely. No child maps FPGA registers.
 
 `owned()` / `alt_launcher_scanout_active()` suppress framebuffer takeover while
