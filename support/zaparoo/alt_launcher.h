@@ -27,6 +27,9 @@ bool alt_launcher_blank_framebuffer(void);
 // True from the moment a launcher start is queued (or a respawn is pending)
 // until the child exits: the OSD must not auto-open over that window.
 bool alt_launcher_owns_screen(void);
+// The menu core may show its snow: no frontend owns the screen, and none is
+// coming back once a running script ends.
+bool alt_launcher_menu_snow_allowed(void);
 bool alt_launcher_console_lease_active(void);
 // The frontend should run and own the screen: installed, enabled, not escaped.
 bool alt_launcher_configured(void);
