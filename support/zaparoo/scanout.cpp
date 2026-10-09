@@ -4,6 +4,7 @@
 #include "scanout_conflict.h"
 #include "../../spi.h"
 #include "../../user_io.h"
+#include "../../video.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -219,6 +220,7 @@ void child_environment()
 {
 	if (getppid() != owner_pid) _exit(1);
 	unsetenv("ZAPAROO_SCANOUT_FD");
+	unsetenv("ZAPAROO_SCANOUT_RASTER");
 	close_fd(parent_fd);
 	if (child_fd < 0) return;
 	int flags = fcntl(child_fd, F_GETFD);
@@ -230,6 +232,7 @@ void child_environment()
 	char value[24];
 	snprintf(value, sizeof(value), "%d", child_fd);
 	setenv("ZAPAROO_SCANOUT_FD", value, 1);
+	setenv("ZAPAROO_SCANOUT_RASTER", "1", 1);
 }
 
 void parent_started(pid_t pid)
@@ -281,7 +284,15 @@ bool poll(bool video_ready)
 	{
 		// Main is the only bus writer. Never yield inside this transaction:
 		// the UI cothread can use the OSD channel between complete packets.
-		if (proxy_valid(buffer, size_t(count)))
+		if (proxy_valid(buffer, size_t(count)) && proxy_word(buffer + 4) == proxy_raster)
+		{
+			int width = 0, height = 0;
+			video_scaler_raster(&width, &height);
+			proxy_store(buffer + 8, uint16_t(width));
+			proxy_store(buffer + 10, uint16_t(height));
+			send(parent_fd, buffer, size_t(count), MSG_NOSIGNAL);
+		}
+		else if (proxy_valid(buffer, size_t(count)))
 		{
 			DisableIO();
 			spi_uio_cmd_cont(proxy_word(buffer + 4));

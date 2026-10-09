@@ -2913,6 +2913,15 @@ void video_scaler_description(char *str, size_t len)
 	video_scaler_description(&current_video_info, &v_cur, str, len);
 }
 
+// The raster a framebuffer's destination window is expressed in. A
+// pixel-repeated mode keeps its logical line width here, so this is not the
+// physical output size and is not what a scale-relative fb_cmd reads back.
+void video_scaler_raster(int *width, int *height)
+{
+	*width = v_cur.item[1];
+	*height = v_cur.item[5];
+}
+
 char* video_get_core_mode_name(int with_vrefresh)
 {
 	static char tmp[256] = {};
@@ -4319,6 +4328,16 @@ void video_cmd(char *cmd)
 			default:
 				accept = 0;
 			}
+		}
+
+		// The kernel module takes any geometry it is handed, but its
+		// reservation holds one FB_SIZE RGB32 frame. video_fb_config() stays
+		// inside it; a scripted geometry must too, or the console redraw
+		// runs off the end of the mapping.
+		if (accept && (int64_t)(((width * bpp) + 15) & ~15) * height > (int64_t)FB_SIZE * 4)
+		{
+			printf("fb_cmd: %dx%d exceeds the framebuffer reservation.\n", width, height);
+			accept = 0;
 		}
 
 		if (rb)
