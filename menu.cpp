@@ -3479,6 +3479,7 @@ void HandleUI(void)
 	case MENU_DOC_FILE_SELECTED:
 		if (cfg.fb_terminal)
 		{
+			if (!alt_launcher_prepare_for_script()) { menustate = MENU_NONE1; break; }
 			memcpy(Selected_tmp, selPath, sizeof(Selected_tmp));
 			static char cmd[1024 * 2];
 			const char *path = getFullPath(selPath);
@@ -3537,6 +3538,7 @@ void HandleUI(void)
 			{
 				video_menu_bg(user_io_status_get("[3:1]"));
 				video_fb_enable(0);
+				alt_launcher_resume_after_script();
 				menustate = MENU_NONE1;
 				menusub = 3;
 				OsdClear();
