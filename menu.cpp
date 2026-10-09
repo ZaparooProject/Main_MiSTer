@@ -890,7 +890,8 @@ static void vga_nag()
 	// owns fb_terminal, so the "fix MiSTer.ini" nag is never actionable.
 	// installed(), not configured(): the advice stays wrong with the frontend
 	// merely disabled.
-	if (video_fb_state() && !alt_launcher_installed())
+	if (video_fb_state() && !alt_launcher_installed() &&
+	    !(cfg.fb_terminal == 2 && !cfg.vga_scaler && !cfg.direct_video))
 	{
 		EnableOsd_on(OSD_VGA);
 		OsdSetSize(16);
@@ -906,7 +907,10 @@ static void vga_nag()
 		OsdWrite(n++, " Either disable framebuffer:");
 		OsdWrite(n++, "       fb_terminal=0");
 		OsdWrite(n++);
-		OsdWrite(n++, "  or enable scaler on VGA:");
+		OsdWrite(n++, " or size it for CRT/VGA:");
+		OsdWrite(n++, "       fb_terminal=2");
+		OsdWrite(n++);
+		OsdWrite(n++, " or enable scaler on VGA:");
 		OsdWrite(n++, "       vga_scaler=1");
 		for (; n < OsdGetSize(); n++) OsdWrite(n);
 		OsdUpdate();
@@ -1698,7 +1702,7 @@ void HandleUI(void)
 				}
 				else
 				{
-					if ((get_key_mod() & (LGUI | RGUI)) && !is_x86() && !is_pcxt() && has_menu()) //Win+Menu
+					if ((get_key_mod() & (LGUI | RGUI)) && !is_f12_mod_needed() && has_menu()) //Win+Menu
 					{
 						menustate = MENU_COMMON1;
 					}
