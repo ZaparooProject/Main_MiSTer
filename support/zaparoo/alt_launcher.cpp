@@ -1308,7 +1308,14 @@ bool alt_launcher_shutdown(void)
 	{
 		// installed(): orphans from a previous Main hold fb0/tty7 regardless
 		// of the current enable setting.
-		if (alt_launcher_installed()) kill_stale_frontends();
+		if (alt_launcher_installed())
+		{
+			kill_stale_frontends();
+			// A frontend killed by signal leaves tty7 foreground in KD_GRAPHICS,
+			// and the kernel refuses to switch away from that: the next
+			// video_chvt() would block in VT_WAITACTIVE for good.
+			reset_launcher_tty();
+		}
 		zero_native_crt_words();
 		reset_launcher_state();
 		if (s_native_crt)
@@ -1325,6 +1332,7 @@ bool alt_launcher_shutdown(void)
 	}
 
 	if (!wait_launcher_stopped(s_pid)) return false;
+	reset_launcher_tty();
 	// The writer is gone: clear its control block before reconfiguration.
 	zero_native_crt_words();
 	reset_launcher_state();
