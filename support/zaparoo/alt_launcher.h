@@ -57,6 +57,9 @@ void alt_launcher_respawn(void);
 bool alt_launcher_scheduler_sleep_enabled(void);
 // Preserves HDMI launcher fb0 across queued startup and live mode changes.
 bool alt_launcher_handle_video_fb_config(void);
+// True only inside a launcher re-assert made before its VT is active: the
+// Direct Video mux must stay off so fb0 shows no other VT's console text.
+bool alt_launcher_hide_direct_video_fb(void);
 
 void alt_launcher_cfg_apply(void);
 uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button);

@@ -88,7 +88,7 @@ bool parse_profile(const std::string &text, Profile &profile)
 		lines[1].find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") != std::string::npos ||
 		!hex(lines[2], 32, 128) || !hex(lines[3], 32, 128) ||
 		!hex(lines[4], 64, 64) || !hex(lines[5], 40, 40) ||
-		lines[6] != "zaparoo-scanout-v1-1080p") return false;
+		lines[6] != "zaparoo-scanout-v2-native") return false;
 	profile.release = lines[1]; profile.kernel_id = lines[2]; profile.module_id = lines[3];
 	profile.sha256 = lines[4]; profile.revision = lines[5]; profile.contract = lines[6];
 	return true;
