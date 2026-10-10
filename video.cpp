@@ -3649,7 +3649,7 @@ static void video_fb_set(int enable, int n, int update_module)
 		}
 
 		DisableIO();
-		if (cfg.direct_video) set_vga_fb(enable && !alt_launcher_hide_direct_video_fb());
+		if (cfg.direct_video) set_vga_fb(enable);
 		if (is_menu()) user_io_status_set("[8:5]", (fb_enabled && !fb_num) ? 0xB : 0);
 	}
 }
