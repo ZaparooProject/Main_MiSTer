@@ -2954,6 +2954,7 @@ static void assign_player(int dev, int num, int force = 0)
 // separate support/zaparoo/ file but #included here because it needs this TU's
 // file-static device tables (input[]/pool[]/devInput/NUMDEV).
 #include "support/zaparoo/launcher_input_detect.inc"
+#include "support/zaparoo/launcher_axis_resync.inc"
 
 static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int dev, bool menu_event)
 {
@@ -5683,6 +5684,7 @@ int input_test(int getchar)
 						memset(&ev, 0, sizeof(ev));
 						if (read(pool[i].fd, &ev, sizeof(ev)) == sizeof(ev))
 						{
+							zaparoo_axis_note_event(i, &ev);
 							if (getchar)
 							{
 								if (ev.type == EV_KEY && ev.value >= 1)
@@ -6382,6 +6384,7 @@ int input_poll(int getchar)
 	if (getchar) return ret;
 
 	uinp_check_key();
+	zaparoo_axis_resync();
 
 	static int prev_dx = 0;
 	static int prev_dy = 0;

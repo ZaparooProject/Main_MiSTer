@@ -7,14 +7,27 @@ without yielding inside a transaction. Its OSD, input and video queries can run
 between packets. Do not remove `fpga_io.cpp`'s direct-owner guards or grant access
 merely because an offer was exported or the child passed `--latch`.
 
-Initial eligibility is HDMI (not Direct Video), with a profile matching both
+Slot eligibility is HDMI (not Direct Video), with a profile matching both
 the running kernel release and its GNU build ID. Frontend finishes vmode/output probes before requesting access.
 Main waits for `finalize_spawn`, checks active mapping conflicts, optionally loads
 `/media/fat/zaparoo/modules/<release>/<kernel-build-id>/zaparoo_scanout.ko`, then acknowledges
 `ZAPAROO-SCANOUT-2` with `ZAPAROO-SCANOUT-2 PROXY` over the inherited
-`SOCK_SEQPACKET` channel. Unknown kernels/native CRT receive no offer. Both old
+`SOCK_SEQPACKET` channel. Unknown kernels receive no offer. Both old
 Main/new frontend and new Main/old direct-MMIO frontend reject the mismatched
-handshake and fall back to fb0. Kernel ABI and FPGA scanout commands are unchanged.
+handshake and fall back to fb0. FPGA scanout commands are unchanged.
+
+Native CRT (with or without Direct Video) gets the same socket in a distinct
+native mode (`Offer::native`). The request, `finalize_spawn` wait, conflict scan
+and module verification are identical; the acknowledgment is
+`ZAPAROO-SCANOUT-2 NATIVE`. It tells the frontend the verified module is loaded,
+so it may map the Menu core's native video window (`0x3A000000`, 3 MB) and use
+the vblank wait through it instead of `/dev/mem`. It grants nothing else: no
+slots, no proxy (packets are ignored, `ZAPAROO_SCANOUT_RASTER` is not exported),
+and `owned()` / `bus_owned()` stay false, so no HDMI lease behavior switches on.
+A denied or absent native offer leaves the frontend on its `/dev/mem` mapping.
+Main keeps writing that window's control words through its own `/dev/mem`
+mappings; its 3 MB blank after spawn completes before `finalize_spawn`, so
+before any native grant. HDMI under Direct Video still receives no offer.
 
 Each subsequent packet contains little-endian u16 magic `0x5A52`, sequence,
 command, count and words. Only SET (`0x57`, 12 words), CAPS (`0x59`, 6 words), and
@@ -42,7 +55,8 @@ asynchronous insmod child; it never unloads a module. Parent-death signaling and
 post-fork parent checks prevent frontend survival after Main.
 
 Active `mem_wc`, MagiK, Zaparoo and overlapping `/dev/mem` checks are conservative
-cooperative checks, not a security boundary. Raw mappers can race them;
+cooperative checks, not a security boundary. The `/dev/mem` check covers the
+slots and the native video window for either grant. Raw mappers can race them;
 independent concurrent renderers remain unsupported.
 
 Build with the existing ARM GNU toolchain and `make` or `./docker-build.sh`.
@@ -58,8 +72,9 @@ Local builds do not authorize deployment, force-loading or release-channel chang
 `scanout_profile.cpp` reads the bounded ELF note stream from `/sys/kernel/notes`
 and the seven-line `profile` file beside the selected module. The format is:
 magic `ZAPAROO-SCANOUT-PROFILE-1`, release, kernel build ID, module build ID,
-module SHA-256, kernel source revision, and `zaparoo-scanout-v1-1080p`, each
+module SHA-256, kernel source revision, and `zaparoo-scanout-v2-native`, each
 followed by a newline. Hex values are lowercase; no extra fields are accepted.
+A v1 profile (`zaparoo-scanout-v1-1080p`) selects no module and gets no offer.
 
 Module hashing runs in the asynchronous loader child using `sha256sum`; hashing
 and insmod share an open file descriptor so renaming a package during update
@@ -71,5 +86,4 @@ also fails closed. These checks detect incompatible or damaged installations;
 they do not authenticate packages against a privileged attacker.
 
 MagiK's Main-window mapping device participates in the existing conflict check.
-The Zaparoo module ABI, slot addresses, UIO protocol and ownership lifecycle
-remain unchanged. Unknown builds and old flat module layouts receive no offer.
+Slot addresses, UIO protocol and ownership lifecycle remain unchanged. Unknown builds and old flat module layouts receive no offer.
