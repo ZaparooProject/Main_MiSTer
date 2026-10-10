@@ -32,7 +32,7 @@ static void *heartbeat(void *)
 		// Main must not write to the SD card four times a second.
 		struct stat st;
 		if (fstat(STDOUT_FILENO, &st) || st.st_size == stamped) continue;
-		dprintf(STDOUT_FILENO, "[zt %lu]\n", uptime_ms());
+		if (dprintf(STDOUT_FILENO, "[zt %lu]\n", uptime_ms()) < 0) continue;
 		if (!fstat(STDOUT_FILENO, &st)) stamped = st.st_size;
 	}
 	return NULL;

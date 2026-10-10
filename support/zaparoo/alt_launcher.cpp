@@ -161,6 +161,7 @@ static bool s_init_pending = false;
 static bool s_native_crt = false;
 static uint8_t s_native_crt_mode = 0;
 static bool s_dv_fb_hold = false;
+static int s_dv_vt_retries = 0;
 static bool s_dv_fb_hidden = false;
 static bool s_resume_after_script = false;
 static bool s_script_resume_crt = false;
@@ -744,6 +745,7 @@ static void arm_direct_video_hold(void)
 	bool hold = !s_native_crt && cfg.direct_video && !launcher_vt_active();
 	if (hold && !s_dv_fb_hold) zlog("direct video: fb0 kept off the output until the VT switch");
 	s_dv_fb_hold = hold;
+	s_dv_vt_retries = 0;
 }
 
 static void launcher_fb_reassert(void)
@@ -801,6 +803,17 @@ static void finalize_spawn(bool tty_ready)
 	zlog("finalize: tty_ready=%d vt_active=%d fb_state=%d", tty_ready, vt_ok, video_fb_state());
 	if (s_dv_fb_hold)
 	{
+		// Releasing the hold on another VT puts its console text on the DAC,
+		// so retry the switch first. The retries are bounded: a VT that never
+		// activates must not leave the output black for good.
+		if (!vt_ok && s_dv_vt_retries < 6)
+		{
+			s_dv_vt_retries++;
+			s_tty_deadline = GetTimer(500);
+			if (!s_tty_deadline) s_tty_deadline = 1;
+			zlog("direct video: VT switch failed, fb0 held for retry %d", s_dv_vt_retries);
+			return;
+		}
 		s_dv_fb_hold = false;
 		zlog("direct video: fb0 on the output after the VT switch (vt_active=%d)", vt_ok);
 	}
