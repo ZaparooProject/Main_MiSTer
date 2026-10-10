@@ -3183,6 +3183,10 @@ char user_io_user_button()
 static int vga_fb = 0;
 void set_vga_fb(int enable)
 {
+	// Zaparoo: with Direct Video on, the mux stays off the Linux console
+	// until the launcher's VT switch. Here, not at the call in
+	// video_fb_set(), whose neighbouring lines upstream keeps changing.
+	if (alt_launcher_hide_direct_video_fb()) enable = 0;
 	vga_fb = enable;
 	user_io_send_buttons(1);
 }

@@ -883,15 +883,9 @@ const char* get_rbf_name_bootcore(char *str)
 }
 
 
-static void vga_nag()
+static void vga_nag_upstream()
 {
-	// On a Zaparoo build the CRT is fed by the menu core directly (its own
-	// snow pattern) or by the frontend's framebuffer, and alt_launcher_cfg_apply
-	// owns fb_terminal, so the "fix MiSTer.ini" nag is never actionable.
-	// installed(), not configured(): the advice stays wrong with the frontend
-	// merely disabled.
-	if (video_fb_state() && !alt_launcher_installed() &&
-	    !(cfg.fb_terminal == 2 && !cfg.vga_scaler && !cfg.direct_video))
+	if (video_fb_state() && !(cfg.fb_terminal == 2 && !cfg.vga_scaler && !cfg.direct_video))
 	{
 		EnableOsd_on(OSD_VGA);
 		OsdSetSize(16);
@@ -920,6 +914,23 @@ static void vga_nag()
 
 	OsdDisable();
 	EnableOsd_on(OSD_ALL);
+}
+
+// On a Zaparoo build the CRT is fed by the menu core directly (its own
+// snow pattern) or by the frontend's framebuffer, and alt_launcher_cfg_apply
+// owns fb_terminal, so the "fix MiSTer.ini" nag is never actionable.
+// installed(), not configured(): the advice stays wrong with the frontend
+// merely disabled. A wrapper, not an edit to upstream's condition, so the
+// stable build's patch does not conflict when upstream changes that line.
+static void vga_nag()
+{
+	if (alt_launcher_installed())
+	{
+		OsdDisable();
+		EnableOsd_on(OSD_ALL);
+		return;
+	}
+	vga_nag_upstream();
 }
 
 void process_addon(char *ext, uint8_t idx)
