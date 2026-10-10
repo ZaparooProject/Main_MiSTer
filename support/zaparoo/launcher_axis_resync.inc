@@ -39,6 +39,12 @@ static bool zaparoo_axis_is_hat(const struct input_absinfo *abs)
 	return (abs->maximum == 1 && abs->minimum == -1) || (abs->maximum == 2 && abs->minimum == 0);
 }
 
+// cfg.dpad_threshold is newer than the upstream release the stable build is
+// based on. Read it where it exists; otherwise use the fixed 50% that
+// release hardcodes, so this file builds on both bases.
+template <typename T> static auto zaparoo_dpad_threshold(const T &c, int) -> decltype(int(c.dpad_threshold)) { return c.dpad_threshold; }
+template <typename T> static int zaparoo_dpad_threshold(const T &, long) { return 50; }
+
 // At rest by a wide margin: a hat off both ends, a stick inside half of the
 // threshold input_test() presses a direction at. Anything nearer an edge is
 // left to the device's own events.
@@ -47,7 +53,7 @@ static bool zaparoo_axis_at_rest(const struct input_absinfo *abs)
 	if (zaparoo_axis_is_hat(abs)) return abs->value != abs->minimum && abs->value != abs->maximum;
 	int range = abs->maximum - abs->minimum + 1;
 	int center = abs->minimum + (range / 2);
-	int margin = (range * cfg.dpad_threshold) / 400;
+	int margin = (range * zaparoo_dpad_threshold(cfg, 0)) / 400;
 	return abs->value >= center - margin && abs->value <= center + margin;
 }
 
