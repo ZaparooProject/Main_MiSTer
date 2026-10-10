@@ -4,6 +4,7 @@
 #include "scanout_conflict.h"
 #include "../../spi.h"
 #include "../../user_io.h"
+#include "../../video.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -24,6 +25,7 @@ namespace zaparoo_scanout {
 namespace {
 const char request[] = "ZAPAROO-SCANOUT-2";
 const char granted[] = "ZAPAROO-SCANOUT-2 PROXY";
+const char granted_native[] = "ZAPAROO-SCANOUT-2 NATIVE";
 const char rejected[] = "ZAPAROO-SCANOUT-2 NO";
 const char device[] = "/dev/zaparoo-scanout";
 Profile selected_profile;
@@ -35,6 +37,8 @@ pid_t loader_pid = 0;
 bool requested = false;
 bool granted_lease = false;
 bool proxied_lease = false;
+Offer offer_mode = Offer::none;
+bool native_lease = false;
 bool loader_tried = false;
 unsigned long long loader_started = 0;
 
@@ -98,8 +102,7 @@ bool conflicting_mappings()
 					conflict = true;
 					break;
 				}
-				unsigned long long limit = offset + end_addr - start;
-				if (offset < 0x23800000ULL && limit > 0x23000000ULL)
+				if (conflicting_physical_range(offset, offset + end_addr - start))
 				{
 					conflict = true;
 					break;
@@ -113,9 +116,16 @@ bool conflicting_mappings()
 	return conflict;
 }
 
+// A native offer has no fb0 route: its child falls back to its own /dev/mem
+// mapping of the native video window.
+const char *fallback()
+{
+	return offer_mode == Offer::native ? "/dev/mem fallback" : "fb0 fallback";
+}
+
 void deny(const char *reason)
 {
-	printf("zaparoo_scanout: fb0 fallback: %s\n", reason);
+	printf("zaparoo_scanout: %s: %s\n", fallback(), reason);
 	if (parent_fd >= 0) send(parent_fd, rejected, sizeof(rejected) - 1, MSG_NOSIGNAL);
 	close_fd(parent_fd);
 	requested = false;
@@ -189,6 +199,7 @@ void stop()
 	requested = false;
 	granted_lease = false;
 	proxied_lease = false;
+	native_lease = false;
 	if (loader_pid)
 	{
 		kill(loader_pid, SIGKILL);
@@ -198,15 +209,16 @@ void stop()
 	}
 }
 
-void prepare(bool eligible)
+void prepare(Offer offer)
 {
 	stop();
 	owner_pid = getpid();
 	loader_tried = false;
-	if (!eligible || loader_pid) return;
+	offer_mode = offer;
+	if (offer == Offer::none || loader_pid) return;
 	if (!select_profile(selected_profile))
 	{
-		printf("zaparoo_scanout: fb0 fallback: no exact kernel build profile\n");
+		printf("zaparoo_scanout: %s: no exact kernel build profile\n", fallback());
 		return;
 	}
 	int sockets[2];
@@ -219,6 +231,7 @@ void child_environment()
 {
 	if (getppid() != owner_pid) _exit(1);
 	unsetenv("ZAPAROO_SCANOUT_FD");
+	unsetenv("ZAPAROO_SCANOUT_RASTER");
 	close_fd(parent_fd);
 	if (child_fd < 0) return;
 	int flags = fcntl(child_fd, F_GETFD);
@@ -230,6 +243,8 @@ void child_environment()
 	char value[24];
 	snprintf(value, sizeof(value), "%d", child_fd);
 	setenv("ZAPAROO_SCANOUT_FD", value, 1);
+	// Nothing is proxied after a native grant, RASTER included.
+	if (offer_mode == Offer::proxy) setenv("ZAPAROO_SCANOUT_RASTER", "1", 1);
 }
 
 void parent_started(pid_t pid)
@@ -263,7 +278,7 @@ bool blank_framebuffer()
 bool poll(bool video_ready)
 {
 	// Reap our own loader even when a denied/disconnected request is gone.
-	if (loader_pid && (parent_fd < 0 || granted_lease))
+	if (loader_pid && (parent_fd < 0 || granted_lease || native_lease))
 	{
 		int status;
 		pid_t result = waitpid(loader_pid, &status, WNOHANG);
@@ -277,11 +292,21 @@ bool poll(bool video_ready)
 		stop();
 		return false;
 	}
+	// A native lease carries no proxy: packets never execute or end it.
+	if (count > 0 && native_lease) return false;
 	if (count > 0 && granted_lease)
 	{
 		// Main is the only bus writer. Never yield inside this transaction:
 		// the UI cothread can use the OSD channel between complete packets.
-		if (proxy_valid(buffer, size_t(count)))
+		if (proxy_valid(buffer, size_t(count)) && proxy_word(buffer + 4) == proxy_raster)
+		{
+			int width = 0, height = 0;
+			video_scaler_raster(&width, &height);
+			proxy_store(buffer + 8, uint16_t(width));
+			proxy_store(buffer + 10, uint16_t(height));
+			send(parent_fd, buffer, size_t(count), MSG_NOSIGNAL);
+		}
+		else if (proxy_valid(buffer, size_t(count)))
 		{
 			DisableIO();
 			spi_uio_cmd_cont(proxy_word(buffer + 4));
@@ -304,13 +329,27 @@ bool poll(bool video_ready)
 		}
 		requested = true;
 	}
-	if (!requested || granted_lease || !video_ready) return false;
+	if (!requested || granted_lease || native_lease || !video_ready) return false;
 	if (conflicting_mappings())
 	{
 		deny("another physical-memory client is active");
 		return false;
 	}
 	if (!ensure_module()) return false;
+	if (offer_mode == Offer::native)
+	{
+		// The verified module is loaded: the child may map the native video
+		// window through it. No slot or bus state changes, so this is not a
+		// grant to the caller and owned() stays false.
+		native_lease = true;
+		if (send(parent_fd, granted_native, sizeof(granted_native) - 1, MSG_NOSIGNAL) != (ssize_t)sizeof(granted_native) - 1)
+		{
+			stop();
+			return false;
+		}
+		printf("zaparoo_scanout: frontend pid=%d may map the native video window\n", frontend_pid);
+		return false;
+	}
 	// v2 grants slot ownership, never direct FPGA access. Legacy direct-bus
 	// requests are rejected above, so mixed stacks safely fall back to fb0.
 	proxied_lease = true;

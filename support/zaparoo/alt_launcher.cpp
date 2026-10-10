@@ -160,6 +160,9 @@ static bool s_gave_up = false;
 static bool s_init_pending = false;
 static bool s_native_crt = false;
 static uint8_t s_native_crt_mode = 0;
+static bool s_dv_fb_hold = false;
+static int s_dv_vt_retries = 0;
+static bool s_dv_fb_hidden = false;
 static bool s_resume_after_script = false;
 static bool s_script_resume_crt = false;
 static bool s_console_lease = false;
@@ -723,6 +726,40 @@ static bool switch_to_vt(int vt)
 	return active;
 }
 
+static bool launcher_vt_active(void)
+{
+	int fd = open("/dev/tty0", O_RDONLY | O_CLOEXEC);
+	if (fd < 0) return false;
+	struct vt_stat st;
+	bool active = !ioctl(fd, VT_GETSTATE, &st) && st.v_active == s_vt;
+	close(fd);
+	return active;
+}
+
+// Under Direct Video an enabled fb0 goes straight to the DAC, and until the
+// launcher VT is active that is another VT's console text. Hold the launcher's
+// own re-asserts off the output from queued startup until finalize_spawn has
+// switched VT. fb0 itself stays enabled so the child's vmode is still accepted.
+static void arm_direct_video_hold(void)
+{
+	bool hold = !s_native_crt && cfg.direct_video && !launcher_vt_active();
+	if (hold && !s_dv_fb_hold) zlog("direct video: fb0 kept off the output until the VT switch");
+	s_dv_fb_hold = hold;
+	s_dv_vt_retries = 0;
+}
+
+static void launcher_fb_reassert(void)
+{
+	s_dv_fb_hidden = s_dv_fb_hold;
+	video_fb_reassert();
+	s_dv_fb_hidden = false;
+}
+
+bool alt_launcher_hide_direct_video_fb(void)
+{
+	return s_dv_fb_hidden;
+}
+
 static void begin_bootstrap()
 {
 	// Direct Video needs its separate VGA framebuffer mux; keep its old path.
@@ -764,6 +801,22 @@ static void finalize_spawn(bool tty_ready)
 	s_tty_deadline = 0;
 	bool vt_ok = switch_to_vt(s_vt);
 	zlog("finalize: tty_ready=%d vt_active=%d fb_state=%d", tty_ready, vt_ok, video_fb_state());
+	if (s_dv_fb_hold)
+	{
+		// Releasing the hold on another VT puts its console text on the DAC,
+		// so retry the switch first. The retries are bounded: a VT that never
+		// activates must not leave the output black for good.
+		if (!vt_ok && s_dv_vt_retries < 6)
+		{
+			s_dv_vt_retries++;
+			s_tty_deadline = GetTimer(500);
+			if (!s_tty_deadline) s_tty_deadline = 1;
+			zlog("direct video: VT switch failed, fb0 held for retry %d", s_dv_vt_retries);
+			return;
+		}
+		s_dv_fb_hold = false;
+		zlog("direct video: fb0 on the output after the VT switch (vt_active=%d)", vt_ok);
+	}
 	zaparoo_launcher::handoff(s_native_crt, [] {
 		// The frontend configures /dev/fb0 before Qt starts. Only publish its
 		// existing buffer here; rewriting the mode after Qt has painted clears
@@ -793,6 +846,7 @@ static void spawn(void)
 	path[sizeof(path) - 1] = '\0';
 
 	begin_bootstrap();
+	arm_direct_video_hold();
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 
@@ -810,13 +864,16 @@ static void spawn(void)
 		// HPS framebuffer is disabled. Re-assert without scheduling the launcher's
 		// current geometry back into the kernel; that delayed write can otherwise
 		// overwrite the child's smaller framebuffer after Qt has mapped it.
-		video_fb_reassert();
+		launcher_fb_reassert();
 		printf("alt_launcher: %s\n", s_bootstrap.hidden() ?
-		       "bootstrap black (mode probing enabled)" : "HPS framebuffer path enabled");
+		       "bootstrap black (mode probing enabled)" : s_dv_fb_hold ?
+		       "HPS framebuffer path enabled, off the output until the VT switch" : "HPS framebuffer path enabled");
 	}
 
 	s_scanout_ready = false;
-	zaparoo_scanout::prepare(!s_native_crt && !cfg.direct_video);
+	// Native CRT gets the native offer whether or not Direct Video is set.
+	zaparoo_scanout::prepare(s_native_crt ? zaparoo_scanout::Offer::native :
+	                         cfg.direct_video ? zaparoo_scanout::Offer::none : zaparoo_scanout::Offer::proxy);
 	s_pid = fork();
 	if (s_pid < 0)
 	{
@@ -863,6 +920,11 @@ bool alt_launcher_owns_screen(void)
 	return s_pid != 0 || s_init_pending || s_respawn_timer != 0;
 }
 
+bool alt_launcher_menu_snow_allowed(void)
+{
+	return !alt_launcher_owns_screen() && !s_resume_after_script;
+}
+
 bool alt_launcher_console_lease_active(void)
 {
 	return s_console_lease;
@@ -880,7 +942,7 @@ bool alt_launcher_handle_video_fb_config(void)
 	// Own HDMI fb configuration from queued initialization through the live
 	// child. This prevents pre-spawn module writes from landing after the
 	// frontend's vmode, and publishes its geometry against later output changes.
-	video_fb_reassert();
+	launcher_fb_reassert();
 	return true;
 }
 
@@ -912,6 +974,7 @@ void alt_launcher_init(bool native_crt)
 	s_init_pending = true;
 	s_pending_logged = false;
 	begin_bootstrap();
+	arm_direct_video_hold();
 	zlog("init queued: native_crt=%d edid=%d fb_state=%d", native_crt, video_get_edid(NULL, NULL), video_fb_state());
 }
 
@@ -1099,7 +1162,7 @@ void alt_launcher_poll(void)
 		{
 			// Re-send scanout state without reconfiguring /dev/fb0 under Qt;
 			// resetting the live kernel framebuffer clears it until dirty repaint.
-			video_fb_reassert();
+			launcher_fb_reassert();
 			if (--s_hdmi_fb_reasserts_remaining > 0)
 			{
 				s_hdmi_fb_reassert_timer = GetTimer(2000);
@@ -1220,7 +1283,7 @@ void alt_launcher_poll(void)
 		{
 			s_fb_watchdog_timer = GetTimer(250);
 			if (!s_fb_watchdog_timer) s_fb_watchdog_timer = 1;
-			video_fb_reassert();
+			launcher_fb_reassert();
 			zlog("watchdog: framebuffer was off, re-asserted (fb_state=%d)", video_fb_state());
 		}
 
@@ -1303,7 +1366,14 @@ bool alt_launcher_shutdown(void)
 	{
 		// installed(): orphans from a previous Main hold fb0/tty7 regardless
 		// of the current enable setting.
-		if (alt_launcher_installed()) kill_stale_frontends();
+		if (alt_launcher_installed())
+		{
+			kill_stale_frontends();
+			// A frontend killed by signal leaves tty7 foreground in KD_GRAPHICS,
+			// and the kernel refuses to switch away from that: the next
+			// video_chvt() would block in VT_WAITACTIVE for good.
+			reset_launcher_tty();
+		}
 		zero_native_crt_words();
 		reset_launcher_state();
 		if (s_native_crt)
@@ -1320,6 +1390,7 @@ bool alt_launcher_shutdown(void)
 	}
 
 	if (!wait_launcher_stopped(s_pid)) return false;
+	reset_launcher_tty();
 	// The writer is gone: clear its control block before reconfiguration.
 	zero_native_crt_words();
 	reset_launcher_state();

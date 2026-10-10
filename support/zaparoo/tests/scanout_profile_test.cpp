@@ -14,13 +14,30 @@ int main()
 	assert(!internal_mapping_process(0, 10, 0, 0));
 	assert(!internal_mapping_process(-1, 10, 20, -1));
 	assert(!internal_mapping_process(30, 10, 20, 0));
+	// HDMI slots and the native video window, one byte either side of each.
+	assert(conflicting_physical_range(0x23000000ULL, 0x23800000ULL));
+	assert(conflicting_physical_range(0x237ff000ULL, 0x23801000ULL));
+	assert(!conflicting_physical_range(0x22000000ULL, 0x23000000ULL));
+	assert(!conflicting_physical_range(0x23800000ULL, 0x23801000ULL));
+	assert(conflicting_physical_range(0x3A000000ULL, 0x3A300000ULL));
+	assert(conflicting_physical_range(0x3A000000ULL, 0x3A001000ULL));
+	assert(conflicting_physical_range(0x3A2ff000ULL, 0x3A301000ULL));
+	assert(conflicting_physical_range(0x39fff000ULL, 0x3A000001ULL));
+	assert(conflicting_physical_range(0x20000000ULL, 0x40000000ULL));
+	assert(!conflicting_physical_range(0x39fff000ULL, 0x3A000000ULL));
+	assert(!conflicting_physical_range(0x3A300000ULL, 0x3A301000ULL));
 	Profile profile;
 	const std::string release = "6.18.38-MiSTer";
 	const std::string input = "ZAPAROO-SCANOUT-PROFILE-1\n" + release + "\n" +
 		std::string(40, 'a') + "\n" + std::string(40, 'b') + "\n" +
-		std::string(64, 'c') + "\n" + std::string(40, 'd') + "\nzaparoo-scanout-v1-1080p\n";
+		std::string(64, 'c') + "\n" + std::string(40, 'd') + "\nzaparoo-scanout-v2-native\n";
 	assert(parse_profile(input, profile));
 	assert(profile.release == release && profile.kernel_id == std::string(40, 'a'));
+	assert(profile.contract == "zaparoo-scanout-v2-native");
+	// A v1 module has no native window mapping: its profile selects nothing.
+	std::string v1 = input;
+	v1.replace(v1.find("v2-native"), 9, "v1-1080p");
+	assert(!parse_profile(v1, profile));
 	assert(!parse_profile(input + "extra\n", profile));
 	assert(!parse_profile(input.substr(0, input.size() - 1), profile));
 	std::string invalid = input;

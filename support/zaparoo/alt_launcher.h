@@ -27,6 +27,9 @@ bool alt_launcher_blank_framebuffer(void);
 // True from the moment a launcher start is queued (or a respawn is pending)
 // until the child exits: the OSD must not auto-open over that window.
 bool alt_launcher_owns_screen(void);
+// The menu core may show its snow: no frontend owns the screen, and none is
+// coming back once a running script ends.
+bool alt_launcher_menu_snow_allowed(void);
 bool alt_launcher_console_lease_active(void);
 // The frontend should run and own the screen: installed, enabled, not escaped.
 bool alt_launcher_configured(void);
@@ -54,6 +57,9 @@ void alt_launcher_respawn(void);
 bool alt_launcher_scheduler_sleep_enabled(void);
 // Preserves HDMI launcher fb0 across queued startup and live mode changes.
 bool alt_launcher_handle_video_fb_config(void);
+// True only inside a launcher re-assert made before its VT is active: the
+// Direct Video mux must stay off so fb0 shows no other VT's console text.
+bool alt_launcher_hide_direct_video_fb(void);
 
 void alt_launcher_cfg_apply(void);
 uint16_t alt_launcher_fb_terminal_key(uint32_t mask, bool osd_button);

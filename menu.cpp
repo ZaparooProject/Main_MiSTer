@@ -890,7 +890,8 @@ static void vga_nag()
 	// owns fb_terminal, so the "fix MiSTer.ini" nag is never actionable.
 	// installed(), not configured(): the advice stays wrong with the frontend
 	// merely disabled.
-	if (video_fb_state() && !alt_launcher_installed())
+	if (video_fb_state() && !alt_launcher_installed() &&
+	    !(cfg.fb_terminal == 2 && !cfg.vga_scaler && !cfg.direct_video))
 	{
 		EnableOsd_on(OSD_VGA);
 		OsdSetSize(16);
@@ -906,7 +907,10 @@ static void vga_nag()
 		OsdWrite(n++, " Either disable framebuffer:");
 		OsdWrite(n++, "       fb_terminal=0");
 		OsdWrite(n++);
-		OsdWrite(n++, "  or enable scaler on VGA:");
+		OsdWrite(n++, " or size it for CRT/VGA:");
+		OsdWrite(n++, "       fb_terminal=2");
+		OsdWrite(n++);
+		OsdWrite(n++, " or enable scaler on VGA:");
 		OsdWrite(n++, "       vga_scaler=1");
 		for (; n < OsdGetSize(); n++) OsdWrite(n);
 		OsdUpdate();
@@ -1698,7 +1702,7 @@ void HandleUI(void)
 				}
 				else
 				{
-					if ((get_key_mod() & (LGUI | RGUI)) && !is_x86() && !is_pcxt() && has_menu()) //Win+Menu
+					if ((get_key_mod() & (LGUI | RGUI)) && !is_f12_mod_needed() && has_menu()) //Win+Menu
 					{
 						menustate = MENU_COMMON1;
 					}
@@ -3475,6 +3479,7 @@ void HandleUI(void)
 	case MENU_DOC_FILE_SELECTED:
 		if (cfg.fb_terminal)
 		{
+			if (!alt_launcher_prepare_for_script()) { menustate = MENU_NONE1; break; }
 			memcpy(Selected_tmp, selPath, sizeof(Selected_tmp));
 			static char cmd[1024 * 2];
 			const char *path = getFullPath(selPath);
@@ -3512,6 +3517,10 @@ void HandleUI(void)
 				execl("/sbin/agetty", "/sbin/agetty",  "-a", "root", "-l", "/tmp/script", "--nohostname", "-L", "tty2", "linux", NULL);
 				exit(1); //should never be reached
 			}
+			// Zaparoo: a failed fork leaves no viewer to wait for. Zero reads as one
+			// that already exited cleanly, so the next pass closes up and resumes
+			// the frontend instead of waiting on pid -1 with it suspended.
+			if (ttypid < 0) ttypid = 0;
 		} else {
 			menustate = MENU_DOC_NO_FBTERM;
 		}
@@ -3533,6 +3542,7 @@ void HandleUI(void)
 			{
 				video_menu_bg(user_io_status_get("[3:1]"));
 				video_fb_enable(0);
+				alt_launcher_resume_after_script();
 				menustate = MENU_NONE1;
 				menusub = 3;
 				OsdClear();
