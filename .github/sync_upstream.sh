@@ -80,10 +80,20 @@ sync_branch() {
     before=$(git rev-parse HEAD)
 
     if ! git merge -Xignore-all-space --no-edit "upstream/${MAIN_BRANCH}"; then
-        echo ""
-        echo "ERROR: Merge conflict on ${branch}. Resolve locally, commit, and push."
-        echo "git rerere will remember the resolution for future runs."
-        exit 1
+        # rerere replays a recorded resolution into the working tree but
+        # leaves the merge uncommitted. When it has resolved every conflicted
+        # file, finish the merge here; anything it could not resolve still
+        # stops the run.
+        if [ -z "$(git rerere remaining)" ]; then
+            echo "rerere resolved every conflict on ${branch}; committing the merge."
+            git add -u
+            git commit --no-edit
+        else
+            echo ""
+            echo "ERROR: Merge conflict on ${branch}. Resolve locally, commit, and push."
+            echo "git rerere will remember the resolution for future runs."
+            exit 1
+        fi
     fi
 
     after=$(git rev-parse HEAD)

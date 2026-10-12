@@ -30,7 +30,7 @@ int main()
 
 	using namespace zaparoo_scanout;
 	unsigned char packet[64] = {};
-	for (uint16_t command : {0x57, 0x59, 0x5B})
+	for (uint16_t command : {uint16_t(0x57), uint16_t(0x59), uint16_t(0x5B), proxy_raster})
 	{
 		proxy_store(packet, proxy_magic);
 		proxy_store(packet + 2, 0xFEDC);

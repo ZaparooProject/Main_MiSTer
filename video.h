@@ -34,6 +34,8 @@ struct VideoInfo
 // expose video timings for timerfd-based frame timer
 extern VideoInfo current_video_info;
 
+bool  video_is_direct();
+
 void  video_init();
 void  video_poll();
 
@@ -75,6 +77,7 @@ void video_mode_cmd(char *cmd);
 
 void video_core_description(char *str, size_t len);
 void video_scaler_description(char *str, size_t len);
+void video_scaler_raster(int *width, int *height);
 char* video_get_core_mode_name(int with_vrefresh = 1);
 
 void dbg_draw_cursor(int x, int y);

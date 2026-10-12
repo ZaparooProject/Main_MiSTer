@@ -1,8 +1,8 @@
 // Persistent Main log for beta diagnostics, enabled by the presence of
 // /media/fat/zaparoo/main.log (touch to enable, delete to disable). stdout and
 // stderr are appended to it from before main(), so the fd survives every
-// app_restart() re-exec and a reboot, and a heartbeat thread stamps the stream
-// with uptime so upstream's untimed output can be placed against zlog's t=.
+// app_restart() re-exec and a reboot, and a heartbeat thread stamps new output
+// with uptime so upstream's untimed lines can be placed against zlog's t=.
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -24,10 +24,16 @@ static unsigned long uptime_ms(void)
 
 static void *heartbeat(void *)
 {
+	off_t stamped = -1;
 	for (;;)
 	{
 		usleep(s_heartbeat_ms * 1000);
-		dprintf(STDOUT_FILENO, "[zt %lu]\n", uptime_ms());
+		// Only output that arrived since the last stamp needs one: an idle
+		// Main must not write to the SD card four times a second.
+		struct stat st;
+		if (fstat(STDOUT_FILENO, &st) || st.st_size == stamped) continue;
+		if (dprintf(STDOUT_FILENO, "[zt %lu]\n", uptime_ms()) < 0) continue;
+		if (!fstat(STDOUT_FILENO, &st)) stamped = st.st_size;
 	}
 	return NULL;
 }

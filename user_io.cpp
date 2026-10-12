@@ -44,6 +44,7 @@
 #include "support.h"
 #include "support/zaparoo/active_game.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/zaparoo/menu_bg.h"
 #include "support/zaparoo/menu_rbf.h"
 
 static char core_path[1024] = {};
@@ -101,14 +102,14 @@ uint32_t user_io_get_activity_seq()
 	return input_seq;
 }
 
-void user_io_store_filename(char *filename)
+void user_io_store_filename(const char *filename)
 {
-	char *p = strrchr(filename, '/');
+	const char *p = strrchr(filename, '/');
 	if (p) strcpy(last_filename, p + 1);
 	else strcpy(last_filename, filename);
 
-	p = strrchr(last_filename, '.');
-	if (p) *p = 0;
+	char *dot = strrchr(last_filename, '.');
+	if (dot) *dot = 0;
 }
 
 const char *get_image_name(int i)
@@ -250,6 +251,14 @@ char is_snes()
 	return (is_snes_type == 1);
 }
 
+// True if the running core is the Apple //e (confstr name "Apple-II").
+static int is_apple2_type = 0;
+char is_apple2()
+{
+	if (!is_apple2_type) is_apple2_type = strcasecmp(orig_name, "Apple-II") ? 2 : 1;
+	return (is_apple2_type == 1);
+}
+
 static int is_sgb_type = 0;
 char is_sgb()
 {
@@ -280,6 +289,24 @@ char is_neogeo()
 
 char is_neogeo_cd() {
     return is_neogeo() && neocd_is_en();
+}
+
+// NeXTcube ("NeXT") & NeXTstation Turbo ("NeXT-Color") share HPS-side services
+char is_next()
+{
+	return !strcasecmp(orig_name, "NeXT") || !strcasecmp(orig_name, "NeXT-Color");
+}
+
+// Guests that read the battery clock as UTC and apply their own time zone
+// (UNIX systems); every other guest gets the timestamp in local time.
+static char rtc_is_utc()
+{
+	return is_next();
+}
+
+char is_falcon()
+{
+	return !strcasecmp(orig_name, "Falcon");
 }
 
 static int is_minimig_type = 0;
@@ -405,6 +432,13 @@ char is_electron()
 	return (is_electron_type == 1);
 }
 
+static int is_marty_type = 0;
+char is_marty()
+{
+	if (!is_marty_type) is_marty_type = strcasecmp(orig_name, "Marty") ? 2 : 1;
+	return (is_marty_type == 1);
+}
+
 static int is_saturn_type = 0;
 char is_saturn()
 {
@@ -449,6 +483,7 @@ void user_io_read_core_name()
 	is_x86_type  = 0;
 	is_no_type   = 0;
 	is_snes_type = 0;
+	is_apple2_type = 0;
 	is_sgb_type = 0;
 	is_cpc_type = 0;
 	is_zx81_type = 0;
@@ -468,6 +503,7 @@ void user_io_read_core_name()
 	is_pcxt_type = 0;
 	is_electron_type = 0;
 	is_saturn_type = 0;
+	is_marty_type = 0;
 	is_n64_type = 0;
 	is_uneon_type = 0;
 	core_name[0] = 0;
@@ -596,8 +632,9 @@ void user_io_status_set(const char *opt, uint32_t value, int ex)
 
 	if (!is_st())
 	{
+		uint32_t ext = minimig_get_extcfg();
 		spi_uio_cmd_cont(UIO_SET_STATUS2);
-		for (uint32_t i = 0; i < sizeof(cur_status); i += 2) spi_w((cur_status[i + 1] << 8) | cur_status[i]);
+		for (uint32_t i = 0; i < sizeof(cur_status); i += 2) spi_w((is_minimig() && (i >> 2) == 1) ? (uint16_t)(ext >> ((i & 2) << 3)) : (cur_status[i + 1] << 8) | cur_status[i]);
 		DisableIO();
 	}
 }
@@ -1003,6 +1040,10 @@ static void parse_config()
 						game_docs_init(str, 0);
 						cheats_init(str, 0);
 					}
+					else if (is_marty())
+					{
+						marty_set_image(idx, str);
+					}
 					else
 					{
 						if (!is_c128()) user_io_set_index((user_io_ext_idx(str, ext) << 6) | idx);
@@ -1116,7 +1157,20 @@ static void send_rtc(int type)
 
 	if (type & 2)
 	{
-		t += t - mktime(gmtime(&t));
+		if (!rtc_is_utc())
+		{
+			if (is_mac_scsi_family())
+			{
+				struct tm tm_utc;
+				gmtime_r(&t, &tm_utc);
+				tm_utc.tm_isdst = -1;
+				t += t - mktime(&tm_utc);
+			}
+			else
+			{
+				t += t - mktime(gmtime(&t));
+			}
+		}
 
 		spi_uio_cmd_cont(UIO_TIMESTAMP);
 		spi_w(t);
@@ -1419,6 +1473,10 @@ void user_io_init(const char *path, const char *xml)
 	// path below restarts them if the card is enabled.
 	a2065_stop();
 
+	// Same for the NeXT ethernet bridge.
+	next_enet_stop();
+	sun_enet_stop();
+
 	// we need to set the directory to where the XML file (MRA) is
 	// not the RBF. The RBF will be in arcade, which the user shouldn't
 	// browse
@@ -1576,6 +1634,7 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
+				zaparoo_menu_bg_init();
 				zaparoo_native_video_release();
 				if (alt_launcher_configured())
 				{
@@ -1588,6 +1647,14 @@ void user_io_init(const char *path, const char *xml)
 			else
 			{
 				zaparoo_alt_launcher_init_for_core();
+				// The ethernet bridge is an addition to the NeXT core, not
+				// a replacement for its start-up: arming it must not claim
+				// a branch of the chain below, or the core skips the boot
+				// ROM load at its end and comes up with no ROM at all.
+				if (is_next()) next_enet_start();
+				// before the boot ROMs: the Sun-2's ID PROM goes in while it is held in reset
+				if (is_sun_family()) sun_enet_start();
+
 				if (xml && isXmlName(xml) == 1)
 				{
 					arcade_send_rom(xml);
@@ -1623,6 +1690,7 @@ void user_io_init(const char *path, const char *xml)
 
 					if (is_uneon()) x86_ide_set();
 					if (is_cdi()) cdi_load_root_nvram();
+					if (is_marty()) marty_init();
 
 					if (!strlen(path) || !user_io_file_tx(path, 0, 0, 0, 1))
 					{
@@ -1720,6 +1788,7 @@ void user_io_init(const char *path, const char *xml)
 		}
 
 		send_rtc(3);
+		if (is_marty() && xml && isXmlName(xml) == 2) marty_mgl_premount();
 
 		// release reset
 		if (!is_minimig() && !is_st()) user_io_status_set("[0]", 0);
@@ -1733,8 +1802,6 @@ void user_io_init(const char *path, const char *xml)
 		}
 		break;
 	}
-
-	OsdRotation((cfg.osd_rotate == 1) ? 3 : (cfg.osd_rotate == 2) ? 1 : 0);
 
 	uart_mode = spi_uio_cmd16(UIO_GETUARTFLG, 0) || uart_speeds[0];
 	uint32_t mode = 0;
@@ -1966,6 +2033,32 @@ int process_ss(const char *rom_name, int enable)
 		uint32_t map_addr = ss_base;
 		fileTYPE f = {};
 
+		// Apple-II: per-game savestates, keyed by the game disk.
+		const char *ss_media = rom_name;
+		if (is_apple2())
+		{
+			static char a2_ss_core[64];
+			snprintf(a2_ss_core, sizeof(a2_ss_core), "%s.", user_io_get_core_name());
+			ss_media = a2_ss_core;
+			static const int a2_ss_slot[3] = {0, 2, 1};
+			for (int p = 0; p < 3; p++)
+			{
+				if (sd_image[a2_ss_slot[p]].size)
+				{
+					// use .name (basename) as it is updated on every open
+					const char *q = sd_image[a2_ss_slot[p]].name;
+					const char *slash = strrchr(q, '/');
+					const char *base = slash ? slash + 1 : q;
+					// media name must have a dot or the handler may crash
+					if (strchr(base, '.'))
+					{
+						ss_media = base;
+						break;
+					}
+				}
+			}
+		}
+
 		for (int i = 0; i < 4; i++)
 		{
 			if (!base[i]) base[i] = shmem_map(map_addr, len);
@@ -1980,13 +2073,13 @@ int process_ss(const char *rom_name, int enable)
 
 				if (!i)
 				{
-					FileGenerateSavestatePath(rom_name, ss_name, 1);
+					FileGenerateSavestatePath(ss_media, ss_name, 1);
 					printf("Base SavestatePath=%s\n", ss_name);
-					if (!FileExists(ss_name)) FileGenerateSavestatePath(rom_name, ss_name, 0);
+					if (!FileExists(ss_name)) FileGenerateSavestatePath(ss_media, ss_name, 0);
 				}
 				else
 				{
-					FileGenerateSavestatePath(rom_name, ss_name, i + 1);
+					FileGenerateSavestatePath(ss_media, ss_name, i + 1);
 				}
 
 				if (FileExists(ss_name))
@@ -2008,7 +2101,7 @@ int process_ss(const char *rom_name, int enable)
 			map_addr += len;
 		}
 
-		FileGenerateSavestatePath(rom_name, ss_name, 1);
+		FileGenerateSavestatePath(ss_media, ss_name, 1);
 		ss_sufx = ss_name + strlen(ss_name) - 4;
 		return 1;
 	}
@@ -2019,7 +2112,6 @@ int process_ss(const char *rom_name, int enable)
 	if (ss_timer && !CheckTimer(ss_timer)) return 0;
 	ss_timer = GetTimer(1000);
 
-	fileTYPE f = {};
 	for (int i = 0; i < 4; i++)
 	{
 		if (base[i])
@@ -2037,16 +2129,8 @@ int process_ss(const char *rom_name, int enable)
 					Info("Saving the state", 500);
 
 					*ss_sufx = i + '1';
-					if (FileOpenEx(&f, ss_name, O_CREAT | O_TRUNC | O_RDWR | O_SYNC))
-					{
-						int ret = FileWriteAdv(&f, base[i], size);
-						FileClose(&f);
-						printf("Wrote %d bytes to file: %s\n", ret, ss_name);
-					}
-					else
-					{
-						printf("Unable to create file: %s\n", ss_name);
-					}
+					int ret = FileSave(ss_name, base[i], size);
+					if (ret) printf("Wrote %d bytes to file: %s\n", ret, ss_name);
 				}
 			}
 		}
@@ -2170,7 +2254,10 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 					const char *core_name = user_io_get_core_name();
 					const char *orig_core_name = user_io_get_core_name(1);
 					const unsigned char ext_idx = last_file_ext_idx;
-					const bool a2_core = !strcasecmp(core_name, "apple-ii") || !strcasecmp(core_name, "TK2000");
+					// The Apple //e core now takes WOZ only (its floppies go through iigs_mount
+					// below, like the IIgs); only TK2000 still uses the on-the-fly nibblizer.
+					const bool a2_core = !strcasecmp(core_name, "TK2000") ||
+						(!strcasecmp(core_name, "apple-ii") && !user_io_a2_woz_enabled());
 					const bool oric_core =
 						!strcasecmp(core_name, "Oric") ||
 						!strcasecmp(core_name, "Pravetz 8D") ||
@@ -2219,6 +2306,13 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 
 				// Mac CD slot: CUE/CHD/raw image translation (support/mac)
 				if (ret) ret = mac_mount_hook(index, name, &sd_image[index], &writable);
+				// Sun CD slot: CUE/CHD/raw image translation (support/sun)
+				if (ret) ret = sun_mount_hook(index, name, &sd_image[index], &writable);
+			if (ret) ret = next_mount_hook(index, name, &sd_image[index], &writable);
+				if (ret) ret = a3_mount_hook(index, name, &sd_image[index], &writable);
+
+				// Falcon SCSI slots: image registration, CD cue/bin translation (support/falcon)
+				if (ret) ret = falcon_scsi_mount_hook(index, name, &sd_image[index], &writable);
 
 				if (ret && is_c128())
 				{
@@ -2238,6 +2332,10 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 		FileClose(&sd_image[index]);
 		c64_closeGCR(index);
 		mac_cdrom_unmount(index);
+		sun_unmount(index);
+		next_unmount(index);
+		a3_unmount(index);
+		falcon_scsi_unmount(index);
 	}
 
 	buffer_lba[index] = -1;
@@ -2259,6 +2357,14 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 	}
 	else
 	{
+		if (is_apple2())
+		{
+			if (ss_base)
+			{
+				process_ss(name); // mount .ss file to persist savestates on SD card
+			}
+			user_io_store_filename(name); // name screenshots after the loaded disk
+		}
 		printf("Mount %s as %s on %d slot\n", name, writable ? "read-write" : "read-only", index);
 	}
 
@@ -2997,6 +3103,49 @@ void user_io_read_confstr()
 	DisableIO();
 }
 
+
+// Number of ;-separated fields in the confstr (0 if empty).
+static int user_io_confstr_field_count()
+{
+	int c = 0;
+	for (int i = 0; cfgstr[i]; i++)
+		if (cfgstr[i] == ';') c++;
+	return c + 1;
+}
+
+// Build date (YYMM) from the confstr V field ("V,v<YYMMDD>")
+static int user_io_confstr_yymm()
+{
+	const char *p = cfgstr;
+	while (*p)
+	{
+		// fields are ;-separated; the type char is the field's first byte
+		if (p[0] == 'V' && p[1] == ',' && p[2] == 'v' &&
+		    p[3] >= '0' && p[3] <= '9' && p[4] >= '0' && p[4] <= '9' &&
+		    p[5] >= '0' && p[5] <= '9' && p[6] >= '0' && p[6] <= '9')
+		{
+			return (p[3]-'0')*1000 + (p[4]-'0')*100 + (p[5]-'0')*10 + (p[6]-'0');
+		}
+		p = strchr(p, ';');
+		if (!p) break;
+		p++;
+	}
+	return 0;
+}
+
+// Apple-II backward compatibility - allow using older builds of the core
+// checks number of fields (must be much more than existing cores)
+// and build date must be in the past
+#define A2_WOZ_MIN_FIELDS 50
+#define A2_WOZ_MIN_DATE 2607
+char user_io_a2_woz_enabled()
+{
+	const char *n = user_io_get_core_name();
+	return n && !strcasecmp(n, "Apple-II") &&
+		user_io_confstr_field_count() > A2_WOZ_MIN_FIELDS &&
+		user_io_confstr_yymm() >= A2_WOZ_MIN_DATE;
+}
+
 char *user_io_get_confstr(int index)
 {
 	int lidx = 0;
@@ -3035,6 +3184,10 @@ char user_io_user_button()
 static int vga_fb = 0;
 void set_vga_fb(int enable)
 {
+	// Zaparoo: with Direct Video on, the mux stays off the Linux console
+	// until the launcher's VT switch. Here, not at the call in
+	// video_fb_set(), whose neighbouring lines upstream keeps changing.
+	if (alt_launcher_hide_direct_video_fb()) enable = 0;
 	vga_fb = enable;
 	user_io_send_buttons(1);
 }
@@ -3067,8 +3220,8 @@ void user_io_send_buttons(char force)
 	if (cfg.dvi_mode == 1) map |= CONF_DVI;
 	if (cfg.hdmi_limited & 1) map |= CONF_HDMI_LIMITED1;
 	if (cfg.hdmi_limited & 2) map |= CONF_HDMI_LIMITED2;
-	if (cfg.direct_video) map |= CONF_DIRECT_VIDEO;
-	if (cfg.direct_video == 2) map |= CONF_DIRECT_VIDEO2;
+	if (video_is_direct()) map |= CONF_DIRECT_VIDEO;
+	if (video_is_direct() && cfg.direct_video == 2) map |= CONF_DIRECT_VIDEO2;
 	if (vga_fb) map |= CONF_VGA_FB;
 
 	if ((map != key_map) || force)
@@ -3157,6 +3310,7 @@ static void mouse_reply(char code)
 
 static uint8_t use_ps2ctl = 0;
 static unsigned long rtc_timer = 0;
+static unsigned long next_rtc_timer = 0;
 
 void user_io_rtc_reset()
 {
@@ -3187,6 +3341,7 @@ void user_io_poll()
 	user_io_send_buttons(0);
 
 	mac_poll();   // Mac SCSI family: Toolbox slot announce + deferred CD work
+	sun_poll();   // Sun SCSI family: write-buffer flushes
 
 	if (is_minimig())
 	{
@@ -3226,6 +3381,20 @@ void user_io_poll()
 
 		minimig_share_poll();
 		a2065_poll();
+	}
+
+	next_enet_poll();
+	sun_enet_poll();
+
+	// The NeXT keeps a battery backed clock that the guest reads at
+	// boot; the one-shot update at core load is not enough if the core
+	// sits at the ROM monitor for a while, so refresh it every minute
+	// like the other cores that own a real time clock.  The core stops
+	// applying these once the guest sets its own time.
+	if (is_next() && (!next_rtc_timer || CheckTimer(next_rtc_timer)))
+	{
+		next_rtc_timer = GetTimer(60000);
+		send_rtc(1);
 	}
 
 	if (core_type == CORE_TYPE_8BIT && !is_menu())
@@ -3275,6 +3444,8 @@ void user_io_poll()
 					blksz = CDI_CDIC_BUFFER_SIZE;
 				else if (mac_cdda_window(disk, lba))
 					blksz = 2352;   // Mac CD-DA: one whole frame per transaction
+				else if (is_marty())
+					blksz = marty_block_size(disk, 128 << ((c >> 6) & 7));
 				else
 					blksz = 128 << ((c >> 6) & 7);
 
@@ -3345,10 +3516,32 @@ void user_io_poll()
 				else if (op & 1) iigs_read(disk, &sd_image[disk], lba, ack);
 				else break;
 			}
-			else if (int macop = mac_sd_service(disk, op, lba, sz, ack))
+			else if (int macop = mac_sd_service(disk, &sd_image[disk], op, lba, sz, ack))
 			{
 				// Mac Toolbox/CD slots (support/mac); SPI is done by the hook.
 				if (macop < 0) break;
+			}
+			else if (int nxop = next_sd_service(disk, op, (uint32_t)lba, sz, ack))
+			{
+				if (nxop < 0) break;
+			}
+			else if (int sunop = sun_sd_service(disk, &sd_image[disk], op, lba, sz, ack))
+			{
+				// Sun disk write buffer and CD slot (support/sun); SPI is done by the hook.
+				if (sunop < 0) break;
+			}
+			else if (int mop = marty_sd_service(disk, op, (uint32_t)lba, sz, ack))
+			{
+				if (mop < 0) break;
+      }
+			else if (int a3op = a3_sd_service(disk, &sd_image[disk], op, lba, sz, ack))
+			{
+				if (a3op < 0) break;
+			}
+			else if (int falop = falcon_sd_service(disk, op, lba, sz, ack))
+			{
+				// Falcon SCSI response windows / translated CD (support/falcon); SPI is done by the hook.
+				if (falop < 0) break;
 			}
 			else if ((blks == G64_BLOCK_COUNT_1541+1 || blks == G64_BLOCK_COUNT_1571+1) && sd_type[disk]==SD_TYPE_C64)
 			{
@@ -3842,6 +4035,7 @@ void user_io_poll()
 	if (is_megacd()) mcd_poll();
 	if (is_pce()) pcecd_poll();
 	if (is_saturn()) saturn_poll();
+	if (is_marty()) marty_poll();
 	if (is_cdi()) cdi_poll();
 	if (is_psx()) psx_poll();
 	if (is_neogeo_cd()) neocd_poll();

@@ -2,6 +2,7 @@
 #include "confstr.h"
 #include "core_watchdog.h"
 #include "kiosk.h"
+#include "menu_bg.h"
 #include "settings.h"
 
 #include <stdio.h>
@@ -352,6 +353,7 @@ void zaparoo_poll(void)
 {
 	zaparoo_core_watchdog_poll();
 	zaparoo_kiosk_poll();
+	zaparoo_menu_bg_poll();
 
 	switch (s_state)
 	{

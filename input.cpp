@@ -2768,11 +2768,12 @@ static void update_num_hw(int dev, int num)
 			led_path = get_led_path(dev);
 			if (led_path)
 			{
-				set_led(led_path, ":home", num ? 1 : 15);
-				set_led(led_path, ":player1", (num == 0 || num == 1 || num == 5));
-				set_led(led_path, ":player2", (num == 0 || num == 2 || num == 6));
-				set_led(led_path, ":player3", (num == 0 || num == 3));
-				set_led(led_path, ":player4", (num == 0 || num == 4 || num == 5 || num == 6));
+				// 5.15 names first, then the mainline hid-nintendo names used by 6.18
+				if (!set_led(led_path, ":home", num ? 1 : 15)) set_led(led_path, ":blue:player-5", num ? 1 : 15);
+				if (!set_led(led_path, ":player1", (num == 0 || num == 1 || num == 5))) set_led(led_path, ":green:player-1", (num == 0 || num == 1 || num == 5));
+				if (!set_led(led_path, ":player2", (num == 0 || num == 2 || num == 6))) set_led(led_path, ":green:player-2", (num == 0 || num == 2 || num == 6));
+				if (!set_led(led_path, ":player3", (num == 0 || num == 3))) set_led(led_path, ":green:player-3", (num == 0 || num == 3));
+				if (!set_led(led_path, ":player4", (num == 0 || num == 4 || num == 5 || num == 6))) set_led(led_path, ":green:player-4", (num == 0 || num == 4 || num == 5 || num == 6));
 			}
 
 			if (repeat && JOYCON_COMBINED(dev)) dev = input[dev].bind; else break;
@@ -2953,6 +2954,7 @@ static void assign_player(int dev, int num, int force = 0)
 // separate support/zaparoo/ file but #included here because it needs this TU's
 // file-static device tables (input[]/pool[]/devInput/NUMDEV).
 #include "support/zaparoo/launcher_input_detect.inc"
+#include "support/zaparoo/launcher_axis_resync.inc"
 
 static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int dev, bool menu_event)
 {
@@ -3048,6 +3050,12 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 			}
 			else
 			{
+				// "Stick 1: Tilt RIGHT/DOWN" skipped while defining the buttons: fall back to stick 1
+				// (as gamecontroller_db.cpp does), otherwise 0 == 0 matches the unmapped stick 2 slots
+				// and the Y axis ends up on the right stick.
+				if (!input[dev].mmap[SYS_AXIS_X]) input[dev].mmap[SYS_AXIS_X] = input[dev].mmap[SYS_AXIS1_X];
+				if (!input[dev].mmap[SYS_AXIS_Y]) input[dev].mmap[SYS_AXIS_Y] = input[dev].mmap[SYS_AXIS1_Y];
+
 				if (input[dev].mmap[SYS_AXIS_X] == input[dev].mmap[SYS_AXIS1_X])
 				{
 					input[dev].stick_l[0] = SYS_AXIS1_X;
@@ -5353,7 +5361,7 @@ int input_test(int getchar)
 
 						if (input[n].vid == 0x057e)
 						{
-							if (strstr(input[n].name, " IMU"))
+							if (strstr(input[n].name, " IMU") || strstr(input[n].name, "(IMU)"))
 							{
 								// don't use Accelerometer
 								close(pool[n].fd);
@@ -5412,6 +5420,18 @@ int input_test(int getchar)
 							input[n].guncal[0] = -32768;
 							input[n].guncal[1] = 32767;
 							input[n].guncal[2] = -32768;
+							input[n].guncal[3] = 32767;
+							input_lightgun_load(n);
+						}
+
+						//X-Gunner Lightgun
+						if (input[n].vid == 0x1209 && input[n].pid >= 0x0001 && input[n].pid <= 0x0004)
+						{
+							input[n].quirk = QUIRK_LIGHTGUN_MOUSE;
+							input[n].lightgun = 1;
+							input[n].guncal[0] = 0;
+							input[n].guncal[1] = 32767;
+							input[n].guncal[2] = 0;
 							input[n].guncal[3] = 32767;
 							input_lightgun_load(n);
 						}
@@ -5682,6 +5702,7 @@ int input_test(int getchar)
 						memset(&ev, 0, sizeof(ev));
 						if (read(pool[i].fd, &ev, sizeof(ev)) == sizeof(ev))
 						{
+							zaparoo_axis_note_event(i, &ev);
 							if (getchar)
 							{
 								if (ev.type == EV_KEY && ev.value >= 1)
@@ -6131,7 +6152,7 @@ int input_test(int getchar)
 										pai = &absinfo;
 										int range = absinfo.maximum - absinfo.minimum + 1;
 										int center = absinfo.minimum + (range / 2);
-										int treshold = range / 4;
+										int treshold = (range * cfg.dpad_threshold) / 200;
 
 										int only_max = 1;
 										for (int n = 0; n < 4; n++) if (input[dev].mmap[SYS_AXIS1_X + n] && ((input[dev].mmap[SYS_AXIS1_X + n] & 0xFFFF) == ev.code)) only_max = 0;
@@ -6381,6 +6402,7 @@ int input_poll(int getchar)
 	if (getchar) return ret;
 
 	uinp_check_key();
+	zaparoo_axis_resync();
 
 	static int prev_dx = 0;
 	static int prev_dy = 0;
