@@ -506,9 +506,11 @@ static void finish_native_crt_path(void)
 
 	blank_native_crt_fb();
 
-	// The 3 MB blank wiped control word2 (analog H size); the frontend only
-	// ever republishes words 0/1, so restore the persisted size here.
-	crt_hsize_republish();
+	// The blank wiped all three control words, but the frontend re-asserts
+	// word1 (offsets) and word2 (H size) on every frame, the same way word0's
+	// counter heals, so both come back on its next frame. Nothing to restore
+	// here. (Older frontends only healed word0/word1 and needed an H-size
+	// republish; that is no longer the contract.)
 
 	s_native_fb_mode_timer = GetTimer(1000);
 	if (!s_native_fb_mode_timer) s_native_fb_mode_timer = 1;

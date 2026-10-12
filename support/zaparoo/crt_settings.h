@@ -50,16 +50,17 @@ void crt_offsets_apply_live(int h, int v, uint8_t mode);
 // word0/word1 (magics 0x5A50/0x5A51); beat 2's low word ("word2", bytes
 // 0x08-0x0B) is [31:16] magic 0x5A52, [15:8] reserved 0, [7:0] signed
 // h_size (core-clamped to -8..+2; anything without the magic reads as 0).
-// Word2 ownership matches word1's offsets: a running frontend owns it (it
-// writes the saved h_size at arm and on live calibration nudges, v byte 0),
-// and Main writes it from this page's live apply, the test pattern, and a
-// republish after alt_launcher's pre-spawn 3 MB blank. Main's OSD save
+// Word2 ownership matches word1's offsets exactly: a running frontend owns it
+// and re-asserts both words on every frame (saved h_size at arm, live
+// calibration nudges, v byte 0), so word2 self-heals after alt_launcher's
+// pre-spawn 3 MB blank the same way word0's counter does -- Main does not
+// restore it. Main only authors word2 from this page's live apply and the
+// test pattern (while the frontend is not the writer). Main's OSD save
 // respawns the frontend so the two writers never run stale side by side.
 // h_size applies only while word1's magic is valid. The deferred v3 plan
 // (plans/menu-crt-video-plan.md sec. 7) repurposes byte 0x08 and moves
 // 0x5A52 into word1; matched releases will replace this layout wholesale.
 void crt_hsize_apply_live(int s);
-void crt_hsize_republish(void);
 
 // Main-drawn alignment pattern published into DDR slot 0 so centering can
 // be adjusted without a running frontend. unpublish returns the core to

@@ -284,13 +284,6 @@ void crt_hsize_apply_live(int s)
 	shmem_unmap(p, 0x1000);
 }
 
-void crt_hsize_republish(void)
-{
-	int s = 0;
-	crt_toml_get_hsize(&s);
-	crt_hsize_apply_live(s);
-}
-
 static void mode_dims(uint8_t mode, int *w, int *h)
 {
 	switch (mode)
