@@ -156,6 +156,7 @@ bool kiosk_page_confirm(int menusub)
 }
 
 static int s_h, s_v, s_h0, s_v0;
+static int s_size, s_size0;
 static bool s_pattern;
 
 static bool position_live(void)
@@ -171,8 +172,10 @@ static int clamp_int(int v, int lo, int hi)
 void position_page_enter(void)
 {
 	crt_toml_get_offsets(&s_h, &s_v);
+	crt_toml_get_hsize(&s_size);
 	s_h0 = s_h;
 	s_v0 = s_v;
+	s_size0 = s_size;
 	s_pattern = false;
 	if (alt_launcher_native_crt_persisted() && !alt_launcher_active())
 		s_pattern = crt_test_pattern_publish(alt_launcher_native_crt_mode(), s_h, s_v);
@@ -182,7 +185,7 @@ void position_page_render(int menusub, uint64_t *menumask)
 {
 	OsdSetSize(16);
 	OsdSetTitle("Position", 0);
-	*menumask = 0x7;
+	*menumask = 0xF;
 
 	char s[64];
 	int m = 0;
@@ -191,23 +194,32 @@ void position_page_render(int menusub, uint64_t *menumask)
 	OsdWrite(m++, s, menusub == 0);
 	sprintf(s, " V offset:               %+3d", s_v);
 	OsdWrite(m++, s, menusub == 1);
+	sprintf(s, " H size:                 %+3d", s_size);
+	OsdWrite(m++, s, menusub == 2);
 	OsdWrite(m++, "");
-	OsdWrite(m++, position_live() ? " Left/Right: move picture" : " No CRT picture to adjust");
+	OsdWrite(m++, position_live() ? " Left/Right: adjust picture" : " No CRT picture to adjust");
+	OsdWrite(m++, " (+2 size narrows position)");
 	while (m < OsdGetSize() - 1) OsdWrite(m++, "");
-	OsdWrite(15, PAGE_STD_BACK, menusub == 2);
+	OsdWrite(15, PAGE_STD_BACK, menusub == 3);
 }
 
 void position_page_adjust(int menusub, int dir)
 {
 	if (menusub == 0) s_h = clamp_int(s_h + dir, CRT_H_OFFSET_MIN, CRT_H_OFFSET_MAX);
 	else if (menusub == 1) s_v = clamp_int(s_v + dir, CRT_V_OFFSET_MIN, CRT_V_OFFSET_MAX);
+	else if (menusub == 2)
+	{
+		s_size = clamp_int(s_size + dir, CRT_H_SIZE_MIN, CRT_H_SIZE_MAX);
+		if (position_live()) crt_hsize_apply_live(s_size);
+		return;
+	}
 	else return;
 	if (position_live()) crt_offsets_apply_live(s_h, s_v, alt_launcher_native_crt_mode());
 }
 
 bool position_page_is_exit(int menusub)
 {
-	return menusub == 2;
+	return menusub == 3;
 }
 
 void position_page_leave(void)
@@ -217,7 +229,25 @@ void position_page_leave(void)
 		crt_test_pattern_unpublish();
 		s_pattern = crt_test_pattern_active();
 	}
-	if (s_h == s_h0 && s_v == s_v0) return;
+	bool size_changed = false;
+	if (s_size != s_size0)
+	{
+		// The frontend owns crt_h_size the same way it owns the offsets
+		// (it caches the value at start and writes word2 live), so a
+		// save here must respawn it below or the frontend would write
+		// the old size back on its next settings save.
+		if (crt_toml_set_hsize(s_size))
+		{
+			s_size0 = s_size;
+			size_changed = true;
+		}
+		else printf("launcher_pages: h size not saved\n");
+	}
+	if (s_h == s_h0 && s_v == s_v0)
+	{
+		if (size_changed && alt_launcher_active()) alt_launcher_respawn();
+		return;
+	}
 	if (!crt_toml_set_offsets(s_h, s_v))
 	{
 		printf("launcher_pages: offsets not saved, frontend left running\n");
