@@ -12,6 +12,7 @@
 #include "video.h"
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/physical_cd_autorun.h"
+#include "support/retroachievements/retroachievements.h"
 
 static cothread_t co_scheduler = nullptr;
 static cothread_t co_poll = nullptr;
@@ -40,6 +41,7 @@ static void scheduler_co_poll(void)
 			alt_launcher_poll();
 			zaparoo_poll();
 			physical_cd_autorun_poll();
+			ra_poll();
 			video_poll();
 		}
 

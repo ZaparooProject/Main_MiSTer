@@ -17,6 +17,7 @@
 #include "osd.h"
 #include "cheats.h"
 #include "support.h"
+#include "support/retroachievements/retroachievements.h"
 
 struct cheat_rec_t
 {
@@ -347,6 +348,7 @@ void cheats_print()
 
 static void cheats_send()
 {
+	if (ra_cheats_blocked(false)) return;
 	static uint8_t buff[CHEAT_SIZE];
 	int pos = 0;
 
@@ -386,6 +388,7 @@ static void cheats_send()
 
 void cheats_toggle()
 {
+	if (ra_cheats_blocked(true)) return;
 	bool changedCheats = false;
 
 	if (cheats[iSelectedEntry].enabled == true)

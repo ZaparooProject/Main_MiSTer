@@ -43,6 +43,7 @@
 #include "scaler.h"
 #include "support.h"
 #include "support/zaparoo/active_game.h"
+#include "support/retroachievements/retroachievements.h"
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/menu_bg.h"
 #include "support/zaparoo/menu_rbf.h"
@@ -3263,6 +3264,7 @@ int user_io_get_kbd_reset()
 
 void user_io_set_kbd_reset(int reset)
 {
+	if (reset && !kbd_reset_ovr && !kbd_reset) ra_core_reset();
 	kbd_reset_ovr = reset;
 }
 
@@ -3567,6 +3569,7 @@ void user_io_poll()
 				//printf("SD WR %llu on %d\n", lba, disk);
 
 				if (use_save) menu_process_save();
+				if (use_save) ra_save_io();
 
 				buffer_lba[disk] = -1;
 
@@ -3614,6 +3617,7 @@ void user_io_poll()
 			}
 			else if (op & 1)
 			{
+				if (use_save && (disk == 0 || (is_saturn() && disk == 1))) ra_save_io();
 				uint32_t buf_n = sizeof(buffer[0]) / blksz;
 				if (is_psx() && blksz == 2352)
 				{
@@ -4397,12 +4401,14 @@ void user_io_check_reset(unsigned short modifiers, char useKeys)
 	{
 		if (modifiers & 2) // with lshift - cold reset
 		{
+			if (!coldreset_req) ra_core_reset();
 			coldreset_req = 1;
 		}
 		else
 		switch (core_type)
 		{
 		case CORE_TYPE_8BIT:
+			if (!is_minimig() && !kbd_reset) ra_core_reset();
 			if(is_minimig()) minimig_reset();
 			else kbd_reset = 1;
 			break;

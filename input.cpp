@@ -39,6 +39,7 @@
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/command_stream.h"
 #include "support/zaparoo/launcher_input_metadata.h"
+#include "support/retroachievements/retroachievements.h"
 
 #define NUMDEV 30
 #define UINPUT_NAME "MiSTer virtual input"
@@ -3247,6 +3248,7 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 		}
 		osd_timer = 0;
 	}
+	osd_event = ra_osd_event_filter(dev, ev->type, ev->code, ev->value, input[dev].mmap[SYS_BTN_Y], osd_event, mapping);
 
 
 	//mapping

@@ -12,6 +12,7 @@
 #include "menu.h"
 #include "user_io.h"
 #include "support.h"
+#include "../retroachievements/retroachievements.h"
 
 // Lists what this core actually offers, so a wrong position is self-explaining
 // instead of a trial-and-error hunt over SSH.
@@ -98,6 +99,7 @@ bool zaparoo_mount(int pos, const char *path)
 	else if (is_megacd())
 	{
 		mcd_set_image(slot, p);
+		if (!slot) ra_game_loaded(p, 0);
 		game_docs_init(p, 0);
 	}
 	else if (is_pce())
@@ -105,12 +107,14 @@ bool zaparoo_mount(int pos, const char *path)
 		pcecd_set_image(slot, p);
 		game_docs_init(p, 0);
 		cheats_init(p, 0);
+		ra_game_loaded(p, 0);
 	}
 	else if (is_psx() && slot == 1)
 	{
 		psx_mount_cd(extidx << 6 | slot, slot, p);
 		game_docs_init(p, 0);
 		cheats_init(p, 0);
+		ra_game_loaded(p, 0);
 	}
 	else if (is_cdi())
 	{
@@ -118,13 +122,18 @@ bool zaparoo_mount(int pos, const char *path)
 	}
 	else if (is_saturn())
 	{
-		if (!slot) saturn_set_image(slot, p);
+		if (!slot)
+		{
+			saturn_set_image(slot, p);
+			ra_game_loaded(p, 0);
+		}
 		else saturn_mount_save(p);
 	}
 	else if (is_neogeo())
 	{
 		neocd_set_en(1);
 		neocd_set_image(p);
+		ra_game_loaded(p, 0);
 	}
 	else if (is_atari800())
 	{
