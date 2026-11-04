@@ -85,10 +85,10 @@ int alt_launcher_translate_system_select(int menusub)
 	// 3 is the Zaparoo page link (no upstream dispatch case).
 	if (menusub == 3) return -2;
 
-	// Maps trimmed-menu menusub to upstream MENU_SYSTEM2 dispatch index:
-	// 0 Remap -> 1, 1 Define joy -> 2, 2 Scripts -> 3, 4 Reboot -> 5,
-	// 5 Exit -> 6.
-	static const int map[] = { 1, 2, 3, -1, 5, 6 };
+	// Maps trimmed-menu menusub to upstream's MENU_SYSTEM_SUB_* dispatch
+	// index: 0 Remap -> KBDMAP 1, 1 Define joy -> JOYPAD_MAP 2,
+	// 2 Scripts -> SCRIPTS 5, 4 Reboot -> REBOOT 7, 5 Exit -> EXIT 8.
+	static const int map[] = { 1, 2, 5, -1, 7, 8 };
 	if (menusub < 0 || menusub >= (int)(sizeof(map) / sizeof(map[0]))) return -1;
 	return map[menusub];
 }
