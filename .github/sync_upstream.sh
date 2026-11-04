@@ -79,7 +79,9 @@ sync_branch() {
     local before after
     before=$(git rev-parse HEAD)
 
-    if ! git merge -Xignore-all-space --no-edit "upstream/${MAIN_BRANCH}"; then
+    # Plain merge, like the rerere training above: -Xignore-all-space kept the
+    # fork's stale whitespace wherever upstream re-indented.
+    if ! git merge --no-edit "upstream/${MAIN_BRANCH}"; then
         # rerere replays a recorded resolution into the working tree but
         # leaves the merge uncommitted. When it has resolved every conflicted
         # file, finish the merge here; anything it could not resolve still
