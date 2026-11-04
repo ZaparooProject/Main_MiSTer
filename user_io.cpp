@@ -302,7 +302,7 @@ char is_next()
 // (UNIX systems); every other guest gets the timestamp in local time.
 static char rtc_is_utc()
 {
-	return is_next();
+	return is_next() || is_hp9k_family();
 }
 
 char is_falcon()
@@ -363,6 +363,19 @@ char is_pcxt()
 			is_pcxt_type = 2;
 	}
 	return (is_pcxt_type == 1);
+}
+
+static int is_pcat286_type = 0;
+char is_pcat286()
+{
+	if (!is_pcat286_type)
+	{
+		if (!strcasecmp(orig_name, "PCAT-286"))
+			is_pcat286_type = 1;
+		else
+			is_pcat286_type = 2;
+	}
+	return (is_pcat286_type == 1);
 }
 
 static int is_gba_type = 0;
@@ -1029,7 +1042,7 @@ static void parse_config()
 				{
 					int idx = p[2] - '0';
 					StoreIdx_S(idx, str);
-					if (is_x86() || is_pcxt() || (is_uneon() && idx >= 2))
+					if (is_x86() || is_pcxt() || is_pcat286() || (is_uneon() && idx >= 2))
 					{
 						x86_set_image(idx, str);
 					}
@@ -1226,7 +1239,7 @@ void MakeFile(const char *filename, const char *data)
 uint16_t f12_mod;
 char is_f12_mod_needed()
 {
-	return (is_x86() || is_pcxt() || is_archie() || (f12_mod != 0));
+	return (is_x86() || is_pcxt() || is_pcat286() || is_archie() || (f12_mod != 0));
 }
 
 int GetUARTMode()
@@ -1484,6 +1497,8 @@ void user_io_init(const char *path, const char *xml)
 	// Same for the NeXT ethernet bridge.
 	next_enet_stop();
 	sun_enet_stop();
+	hp9k_enet_stop();
+	sgi_enet_stop();
 
 	// we need to set the directory to where the XML file (MRA) is
 	// not the RBF. The RBF will be in arcade, which the user shouldn't
@@ -1591,7 +1606,7 @@ void user_io_init(const char *path, const char *xml)
 	load_volume();
 
 	user_io_send_buttons(1);
-	if (xml && isXmlName(xml) == 2) mgl_parse(xml);
+	if (xml && isXmlName(xml)) mgl_parse(xml);
 
 	switch (core_type)
 	{
@@ -1608,7 +1623,8 @@ void user_io_init(const char *path, const char *xml)
 			{
 				printf("Loading config %s\n", name);
 				memset(cur_status, 0, sizeof(cur_status));
-				if (FileLoadConfig(name, cur_status, sizeof(cur_status)))
+				int config_found = FileLoadConfig(name, cur_status, sizeof(cur_status));
+				if (config_found)
 				{
 					printf("Found config:\n");
 					hexdump(cur_status, sizeof(cur_status));
@@ -1618,6 +1634,7 @@ void user_io_init(const char *path, const char *xml)
 					memset(cur_status, 0, sizeof(cur_status));
 				}
 
+				if (xml && isXmlName(xml) == 2) mgl_apply_options(config_found);
 				user_io_status_set("[0]", 1);
 			}
 
@@ -1650,6 +1667,8 @@ void user_io_init(const char *path, const char *xml)
 				if (is_next()) next_enet_start();
 				// before the boot ROMs: the Sun-2's ID PROM goes in while it is held in reset
 				if (is_sun_family()) sun_enet_start();
+				if (is_hp9k_family()) hp9k_enet_start();
+				if (is_sgi_family()) sgi_enet_start();
 
 				if (xml && isXmlName(xml) == 1)
 				{
@@ -1662,10 +1681,10 @@ void user_io_init(const char *path, const char *xml)
 					BootInit();
 					a2065_start();
 				}
-				else if (is_x86() || is_pcxt())
+				else if (is_x86() || is_pcxt() || is_pcat286())
 				{
 					x86_config_load();
-					x86_init();
+					x86_init(1);
 				}
 				else if (is_archie())
 				{
@@ -1842,7 +1861,7 @@ void user_io_init(const char *path, const char *xml)
 
 	f12_mod = spi_uio_cmd(UIO_GET_F12_MOD);
 
-	if (!mgl_get()->count || is_menu() || is_st() || is_archie())
+	if (!mgl_get()->count || is_menu() || is_archie())
 	{
 		mgl_get()->done = 1;
 	}
@@ -1856,6 +1875,7 @@ static int joyswap = 0;
 void user_io_set_joyswap(int swap)
 {
 	joyswap = swap;
+	input_analog_triggers_resync(osd_is_visible);
 }
 
 int user_io_get_joyswap()
@@ -1893,6 +1913,21 @@ void user_io_r_analog_joystick(unsigned char joystick, char valueX, char valueY)
 			spi8(valueX);
 			spi8(valueY);
 		}
+		DisableIO();
+	}
+}
+
+void user_io_analog_triggers(unsigned char joystick, uint8_t l2, uint8_t r2)
+{
+	static uint8_t sent[NUMPLAYERS][2] = {};
+	uint8_t joy = (joystick > 1 || !joyswap) ? joystick : joystick ^ 1;
+
+	if (core_type == CORE_TYPE_8BIT && joy < NUMPLAYERS && (sent[joy][0] != l2 || sent[joy][1] != r2))
+	{
+		sent[joy][0] = l2;
+		sent[joy][1] = r2;
+		spi_uio_cmd8_cont(UIO_ATRIG, joy);
+		spi_w((r2 << 8) | l2);
 		DisableIO();
 	}
 }
@@ -2209,7 +2244,7 @@ void user_io_file_info(const char *ext)
 	DisableFpga();
 }
 
-int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_size)
+int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_size, int image)
 {
 	int writable = 0;
 	int ret = 0;
@@ -2306,6 +2341,8 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 				if (ret) ret = mac_mount_hook(index, name, &sd_image[index], &writable);
 				// Sun CD slot: CUE/CHD/raw image translation (support/sun)
 				if (ret) ret = sun_mount_hook(index, name, &sd_image[index], &writable);
+				if (ret) ret = hp9k_mount_hook(index, name, &sd_image[index], &writable);
+				if (ret) ret = sgi_mount_hook(index, name, &sd_image[index], &writable);
 			if (ret) ret = next_mount_hook(index, name, &sd_image[index], &writable);
 				if (ret) ret = a3_mount_hook(index, name, &sd_image[index], &writable);
 
@@ -2331,13 +2368,19 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 		c64_closeGCR(index);
 		mac_cdrom_unmount(index);
 		sun_unmount(index);
+		hp9k_unmount(index);
+		sgi_unmount(index);
 		next_unmount(index);
 		a3_unmount(index);
 		falcon_scsi_unmount(index);
 	}
 
 	buffer_lba[index] = -1;
-	pc88_mount(index);
+	if (!pc88_mount(index, ret ? &sd_image[index] : NULL, name, image, &writable))
+	{
+		FileClose(&sd_image[index]);
+		ret = 0;
+	}
 	if (!index || is_cdi() || (is_saturn() && index==1)) use_save = pre;
 
 	if (!ret)
@@ -2373,7 +2416,7 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 	EnableIO();
 	spi8(UIO_SET_SDINFO);
 
-	__off64_t size = sd_image[index].size;
+	__off64_t size = pc88_size(index, sd_image[index].size);
 	if (!ret && pre)
 	{
 		sd_image[index].type = 2;
@@ -3243,7 +3286,7 @@ void user_io_send_buttons(char force)
 			if (is_neogeo_cd()) neocd_reset();
 			if (is_pce()) pcecd_reset();
 			if (is_saturn()) saturn_reset();
-			if (is_x86() || is_pcxt()) x86_init();
+			if (is_x86() || is_pcxt() || is_pcat286()) x86_init();
 			if (is_uneon()) x86_ide_set();
 			if (is_st()) tos_reset(0);
 			if (is_3do()) p3do_reset();
@@ -3341,6 +3384,8 @@ void user_io_poll()
 
 	mac_poll();   // Mac SCSI family: Toolbox slot announce + deferred CD work
 	sun_poll();   // Sun SCSI family: write-buffer flushes
+	hp9k_poll();
+	sgi_poll();
 
 	if (is_minimig())
 	{
@@ -3384,6 +3429,8 @@ void user_io_poll()
 
 	next_enet_poll();
 	sun_enet_poll();
+	hp9k_enet_poll();
+	sgi_enet_poll();
 
 	// The NeXT keeps a battery backed clock that the guest reads at
 	// boot; the one-shot update at core load is not enough if the core
@@ -3402,7 +3449,7 @@ void user_io_poll()
 	}
 
 	// sd card emulation
-	if (is_x86() || is_pcxt())
+	if (is_x86() || is_pcxt() || is_pcat286())
 	{
 		x86_poll(0);
 	}
@@ -3530,6 +3577,14 @@ void user_io_poll()
 			{
 				// Sun disk write buffer and CD slot (support/sun); SPI is done by the hook.
 				if (sunop < 0) break;
+			}
+			else if (int hpop = hp9k_sd_service(disk, &sd_image[disk], op, lba, sz, ack))
+			{
+				if (hpop < 0) break;
+			}
+			else if (int sgop = sgi_sd_service(disk, &sd_image[disk], op, lba, sz, ack))
+			{
+				if (sgop < 0) break;
 			}
 			else if (int mop = marty_sd_service(disk, op, (uint32_t)lba, sz, ack))
 			{
@@ -4423,8 +4478,11 @@ void user_io_check_reset(unsigned short modifiers, char useKeys)
 
 void user_io_osd_key_enable(char on)
 {
+	on = !!on;
 	//printf("OSD is now %s\n", on ? "visible" : "invisible");
+	if (osd_is_visible != on) input_analog_triggers_resync(on);
 	osd_is_visible = on;
+
 	if (cfg.log_file_entry) MakeFile("/tmp/OSD_VISIBLE", on ? "1" : "0");
 	input_switch(-1);
 }
