@@ -54,6 +54,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "support/zaparoo/alt_launcher_menu.h"
 #include "support/zaparoo/launcher_pages.h"
 #include "support/zaparoo/menu_rbf.h"
+#include "support/retroachievements/retroachievements.h"
 #include "user_io.h"
 #include "debug.h"
 #include "fpga_io.h"
@@ -247,6 +248,11 @@ enum MENU
 	MENU_ZAPAROO_KIOSK2,
 	MENU_ZAPAROO_AUTOSAVE1,
 	MENU_ZAPAROO_AUTOSAVE2,
+	// RetroAchievements list (support/retroachievements)
+	MENU_RA_LIST1,
+	MENU_RA_LIST2,
+	MENU_RA_DETAIL1,
+	MENU_RA_DETAIL2,
 };
 
 static uint32_t menustate = MENU_NONE1;
@@ -1401,6 +1407,10 @@ void HandleUI(void)
 			}
 			break;
 
+		case KEY_F6:
+			if (ra_list_open(MENU_NONE1, 0)) { menusub = 0; menustate = MENU_RA_LIST1; }
+			break;
+
 		case KEY_F11:
 			if (user_io_osd_is_visible() && (menustate != MENU_SCRIPTS1 || script_finished))
 			{
@@ -2267,6 +2277,14 @@ void HandleUI(void)
 				}
 			} while (p);
 
+			if (ra_menu_add_row(page, selentry))
+			{
+				MenuWrite(entry, " Achievements", menusub == selentry, 0);
+				menumask = (menumask << 1) | 1;
+				entry++;
+				selentry++;
+			}
+
 			if (!entry) break;
 
 			for (; entry < OsdGetSize() - 1; entry++) MenuWrite(entry, "", 0, 0);
@@ -2379,6 +2397,11 @@ void HandleUI(void)
 				page = 0;
 			}
 		}
+		else if (c == KEY_TAB && ra_list_open(MENU_GENERIC_MAIN1, menusub))
+		{
+			menusub = 0;
+			menustate = MENU_RA_LIST1;
+		}
 		else if (select || recent || minus || plus || !mgl->done)
 		{
 			if (!mgl->done)
@@ -2387,6 +2410,11 @@ void HandleUI(void)
 				select = 1;
 			}
 
+			if (ra_menu_row_selected(menusub, select))
+			{
+				if (ra_list_open(MENU_GENERIC_MAIN1, menusub)) { menusub = 0; menustate = MENU_RA_LIST1; }
+			}
+			else
 			if (manual_submenu == menusub)
 			{
 				if (select)
@@ -2676,6 +2704,7 @@ void HandleUI(void)
 									user_io_status_set(opt, 1, ex);
 									if (is_n64() && !ex && !strcmp(opt, "[41]")) n64_save_dd_disk();
 									user_io_status_set(opt, 0, ex);
+									ra_status_option_set(bit, ex, p);
 
 									menustate = MENU_GENERIC_MAIN1;
 									if (p[0] == 'R' || p[0] == 'r') menustate = MENU_NONE1;
@@ -2750,6 +2779,7 @@ void HandleUI(void)
 				{
 					neocd_set_en(0);
 					neogeo_romset_tx(selPath, 0);
+					ra_game_loaded(selPath, 0);
 				}
 				else
 				{
@@ -2768,6 +2798,7 @@ void HandleUI(void)
 						{
 							game_docs_init(selPath, n64_crc);
 							if (user_io_use_cheats()) cheats_init(selPath, n64_crc);
+							ra_game_loaded(selPath, n64_crc);
 						}
 					}
 					else if (is_c64() || is_c128())
@@ -2813,6 +2844,7 @@ void HandleUI(void)
 						{
 							game_docs_init(selPath, user_io_get_file_crc());
 							if (user_io_use_cheats()) cheats_init(selPath, user_io_get_file_crc());
+							ra_game_loaded(selPath, user_io_get_file_crc());
 						}
 					}
 				}
@@ -2873,6 +2905,7 @@ void HandleUI(void)
 			else if (is_megacd())
 			{
 				mcd_set_image(ioctl_index, selPath);
+				if (!ioctl_index) ra_game_loaded(selPath, 0);
 				game_docs_init(selPath, 0);
 			}
 			else if (is_pce())
@@ -2880,12 +2913,14 @@ void HandleUI(void)
 				pcecd_set_image(ioctl_index, selPath);
 				game_docs_init(selPath, 0);
 				cheats_init(selPath, 0);
+				ra_game_loaded(selPath, 0);
 			}
 			else if (is_psx() && ioctl_index == 1)
 			{
 				psx_mount_cd(user_io_ext_idx(selPath, fs_pFileExt) << 6 | (menusub + 1), ioctl_index, selPath);
 				game_docs_init(selPath, 0);
 				cheats_init(selPath, 0);
+				ra_game_loaded(selPath, 0);
 			}
 			else if (is_cdi())
 			{
@@ -2896,6 +2931,7 @@ void HandleUI(void)
 				if (!ioctl_index)
 				{
 					saturn_set_image(ioctl_index, selPath);
+					ra_game_loaded(selPath, 0);
 				} else {
 					saturn_mount_save(selPath);
 				}
@@ -2904,6 +2940,7 @@ void HandleUI(void)
 			{
 				neocd_set_en(1);
 				neocd_set_image(selPath);
+				ra_game_loaded(selPath, 0);
 			}
 			else if (is_atari800())
 			{
@@ -7741,6 +7778,33 @@ void HandleUI(void)
 		}
 		break;
 
+	case MENU_RA_LIST1:
+		helptext_idx = 0;
+		ra_list_render();
+		menustate = MENU_RA_LIST2;
+		parentstate = menustate;
+		break;
+
+	case MENU_RA_LIST2:
+		menumask = 0;
+		switch (ra_list_input(menu || back, select, up, down, c, &menustate, &menusub))
+		{
+		case RA_LIST_REDRAW: menustate = MENU_RA_LIST1; break;
+		case RA_LIST_DETAIL: menustate = MENU_RA_DETAIL1; break;
+		}
+		break;
+
+	case MENU_RA_DETAIL1:
+		ra_detail_render();
+		menustate = MENU_RA_DETAIL2;
+		parentstate = menustate;
+		break;
+
+	case MENU_RA_DETAIL2:
+		menumask = 0;
+		if (menu || back) menustate = MENU_RA_LIST1;
+		break;
+
 	case MENU_JOYSYSMAP:
 		strcpy(joy_bnames[SYS_BTN_A - DPAD_NAMES], "A");
 		strcpy(joy_bnames[SYS_BTN_B - DPAD_NAMES], "B");
@@ -8938,5 +9002,28 @@ void ProgressMessage(const char* title, const char* text, int current, int max)
 		buf[PROGRESS_CNT] = 0;
 
 		InfoMessage(progress_buf, 2000, title);
+	}
+}
+
+// RA popups (support/retroachievements/ra_menu.h). The core samples the
+// info window x in 512 steps; each character is 8 wide.
+void InfoAligned(const char *message, int timeout, int align, int frame)
+{
+	if (menustate <= MENU_INFO)
+	{
+		int width = 0, height = 0;
+		OSD_PrintInfo(message, &width, &height, frame);
+
+		int x = 20;
+		if (align == INFO_ALIGN_CENTER) x = (512 - width * 8) / 2;
+		else if (align == INFO_ALIGN_RIGHT) x = 512 - width * 8 - 20;
+		if (x < 0) x = 0;
+
+		InfoEnable(x, (cfg.direct_video && get_vga_fb()) ? 30 : 10, width, height);
+		OsdSetSize(16);
+
+		menu_timer = GetTimer(timeout);
+		menustate = MENU_INFO;
+		OsdUpdate();
 	}
 }

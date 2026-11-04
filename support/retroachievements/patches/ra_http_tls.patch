@@ -1,0 +1,25 @@
+--- a/support/retroachievements/ra_http.cpp
++++ b/support/retroachievements/ra_http.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include "ra_http.h"
+ #include "achievements.h"
++#include "retroachievements.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -186,9 +187,12 @@
+ 		off += snprintf(cmd + off, cmd_len - off, "' | ");
+ 	}
+ 
+-	// curl base flags (-k: skip SSL cert verification — MiSTer CA bundle is outdated)
++	// curl base flags: HTTPS only, verified against ra_ca_bundle_path() or
++	// curl's default store.
+ 	off += snprintf(cmd + off, cmd_len - off,
+-		"curl -s -k -L --max-time 30 -w '\\n%%{http_code}' -A '%s'", s_user_agent);
++		"curl -s -L --proto =https --proto-redir =https --max-time 30 -w '\\n%%{http_code}' -A '%s'", s_user_agent);
++	if (ra_ca_bundle_path())
++		off += snprintf(cmd + off, cmd_len - off, " --cacert '%s'", ra_ca_bundle_path());
+ 
+ 	if (req->post_data && req->post_data[0]) {
+ 		const char *ct = (req->content_type && req->content_type[0])

@@ -2,6 +2,7 @@
 #define MENU_H
 
 #include <inttypes.h>
+#include "support/retroachievements/ra_menu.h"
 
 void SelectFile(const char* path, const char* pFileExt, int Options, unsigned char MenuSelect, unsigned char MenuCancel, int recent_idx = -1);
 
