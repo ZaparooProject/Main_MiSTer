@@ -22,6 +22,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include "cfg.h"
 #include "file_io.h"
@@ -166,6 +167,9 @@ static bool s_dv_fb_hidden = false;
 static bool s_resume_after_script = false;
 static bool s_script_resume_crt = false;
 static bool s_console_lease = false;
+// A script or document viewer holds the console, from
+// alt_launcher_prepare_for_script() to alt_launcher_resume_after_script().
+static bool s_script_running = false;
 static bool s_console_state_published = false;
 static char s_console_lease_nonce[65] = {};
 static const int s_vt = 7;
@@ -179,6 +183,12 @@ static char s_saved_fb_mode[64];
 static bool s_saved_fb_mode_valid = false;
 
 static void publish_console_state(const char *state, const char *nonce);
+static void publish_frontend_status(void);
+static const char s_status_dir[] = "/tmp/zaparoo";
+static const char s_status_path[] = "/tmp/zaparoo/frontend_status.json";
+static const char s_status_tmp_path[] = "/tmp/zaparoo/frontend_status.json.tmp";
+static int s_status_published = -1;
+static unsigned long s_status_retry_timer = 0;
 
 // Frontend exit code requesting a respawn after it rewrote
 // zaparoo_launcher_crt.bin itself (launcher-owned CRT toggle).
@@ -989,6 +999,7 @@ bool alt_launcher_prepare_for_script(void)
 	if (!s_pid)
 	{
 		reset_launcher_tty();
+		s_script_running = true;
 		return true;
 	}
 
@@ -1004,11 +1015,13 @@ bool alt_launcher_prepare_for_script(void)
 	s_gave_up = false;
 	release_launcher_video();
 	reset_launcher_tty();
+	s_script_running = true;
 	return true;
 }
 
 void alt_launcher_resume_after_script(void)
 {
+	s_script_running = false;
 	if (!s_resume_after_script)
 	{
 		reset_launcher_tty();
@@ -1046,6 +1059,57 @@ static void publish_console_state(const char *state, const char *nonce)
 		return;
 	}
 	s_console_state_published = true;
+}
+
+// Tells Zaparoo Core whether the frontend is the active launcher, so Core
+// shows its pickers and confirms in the frontend instead of its own MiSTer
+// widget. A crash-loop give-up leaves configured() true for the trimmed OSD,
+// but no frontend is left to show anything, so it reads as inactive here.
+// So does a script or document viewer holding the console, through Core's
+// lease or straight from the OSD: the frontend is stopped until it ends, and
+// Core's widget shows events meanwhile, as before.
+// Runs every poll tick, including under a game core, and only touches the
+// file when the value differs from the last one written. A fresh process
+// always writes once, since a stale file can outlive the previous Main. The
+// file names the Main process that wrote it, like /tmp/zaparoo_main: Core
+// trusts it only while that pid is alive, so a stock Main started by a
+// core's main= leaves a dead pid behind and is never taken for this one.
+static void publish_frontend_status(void)
+{
+	bool active = alt_launcher_configured() && !s_gave_up && !alt_launcher_console_lease_active() && !s_script_running;
+	if (s_status_published == (int)active) return;
+	if (s_status_retry_timer && !CheckTimer(s_status_retry_timer)) return;
+	s_status_retry_timer = 0;
+
+	const char *err = NULL;
+	if (mkdir(s_status_dir, 0755) && errno != EEXIST) err = "mkdir";
+	if (!err)
+	{
+		FILE *fp = fopen(s_status_tmp_path, "wt");
+		if (!fp) err = "open";
+		else
+		{
+			int written = fprintf(fp, "{\"active\":%s,\"pid\":%d}\n", active ? "true" : "false", (int)getpid());
+			if (fclose(fp) || written < 0) err = "write";
+			else if (rename(s_status_tmp_path, s_status_path)) err = "rename";
+		}
+	}
+	if (err)
+	{
+		printf("alt_launcher: unable to publish frontend status (%s): %s\n", err, strerror(errno));
+		unlink(s_status_tmp_path);
+		// The old status may say the opposite of what is true now. No file
+		// reads as inactive, the safe answer, and the next write starts from
+		// nothing published.
+		unlink(s_status_path);
+		s_status_published = -1;
+		// Retry later rather than on every tick.
+		s_status_retry_timer = GetTimer(1000);
+		if (!s_status_retry_timer) s_status_retry_timer = 1;
+		return;
+	}
+	s_status_published = active;
+	printf("alt_launcher: frontend status active=%d\n", active);
 }
 
 static bool valid_console_nonce(const char *nonce)
@@ -1136,6 +1200,7 @@ bool alt_launcher_command(const char *cmd)
 
 void alt_launcher_poll(void)
 {
+	publish_frontend_status();
 	bool was_scanout_owned = zaparoo_scanout::owned();
 	if (!s_pid)
 	{
