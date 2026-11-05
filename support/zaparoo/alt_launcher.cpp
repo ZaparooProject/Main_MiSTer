@@ -167,6 +167,9 @@ static bool s_dv_fb_hidden = false;
 static bool s_resume_after_script = false;
 static bool s_script_resume_crt = false;
 static bool s_console_lease = false;
+// A script or document viewer holds the console, from
+// alt_launcher_prepare_for_script() to alt_launcher_resume_after_script().
+static bool s_script_running = false;
 static bool s_console_state_published = false;
 static char s_console_lease_nonce[65] = {};
 static const int s_vt = 7;
@@ -996,6 +999,7 @@ bool alt_launcher_prepare_for_script(void)
 	if (!s_pid)
 	{
 		reset_launcher_tty();
+		s_script_running = true;
 		return true;
 	}
 
@@ -1011,11 +1015,13 @@ bool alt_launcher_prepare_for_script(void)
 	s_gave_up = false;
 	release_launcher_video();
 	reset_launcher_tty();
+	s_script_running = true;
 	return true;
 }
 
 void alt_launcher_resume_after_script(void)
 {
+	s_script_running = false;
 	if (!s_resume_after_script)
 	{
 		reset_launcher_tty();
@@ -1059,8 +1065,9 @@ static void publish_console_state(const char *state, const char *nonce)
 // shows its pickers and confirms in the frontend instead of its own MiSTer
 // widget. A crash-loop give-up leaves configured() true for the trimmed OSD,
 // but no frontend is left to show anything, so it reads as inactive here.
-// So does a script holding the console: the frontend is stopped until the
-// script releases it, and Core's widget shows events meanwhile, as before.
+// So does a script or document viewer holding the console, through Core's
+// lease or straight from the OSD: the frontend is stopped until it ends, and
+// Core's widget shows events meanwhile, as before.
 // Runs every poll tick, including under a game core, and only touches the
 // file when the value differs from the last one written. A fresh process
 // always writes once, since a stale file can outlive the previous Main. The
@@ -1069,7 +1076,7 @@ static void publish_console_state(const char *state, const char *nonce)
 // core's main= leaves a dead pid behind and is never taken for this one.
 static void publish_frontend_status(void)
 {
-	bool active = alt_launcher_configured() && !s_gave_up && !alt_launcher_console_lease_active();
+	bool active = alt_launcher_configured() && !s_gave_up && !alt_launcher_console_lease_active() && !s_script_running;
 	if (s_status_published == (int)active) return;
 	if (s_status_retry_timer && !CheckTimer(s_status_retry_timer)) return;
 	s_status_retry_timer = 0;
@@ -1091,6 +1098,11 @@ static void publish_frontend_status(void)
 	{
 		printf("alt_launcher: unable to publish frontend status (%s): %s\n", err, strerror(errno));
 		unlink(s_status_tmp_path);
+		// The old status may say the opposite of what is true now. No file
+		// reads as inactive, the safe answer, and the next write starts from
+		// nothing published.
+		unlink(s_status_path);
+		s_status_published = -1;
 		// Retry later rather than on every tick.
 		s_status_retry_timer = GetTimer(1000);
 		if (!s_status_retry_timer) s_status_retry_timer = 1;
