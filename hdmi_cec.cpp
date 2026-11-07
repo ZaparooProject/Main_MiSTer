@@ -296,7 +296,7 @@ static void cec_handle_button(uint8_t button_code, bool pressed)
 		case CEC_USER_CONTROL_LEFT:      key = KEY_LEFT; break;
 		case CEC_USER_CONTROL_RIGHT:     key = KEY_RIGHT; break;
 		case CEC_USER_CONTROL_SELECT:    key = KEY_ENTER; break;
-		case CEC_USER_CONTROL_ROOT_MENU: key = menu_present() ? KEY_BACK : KEY_MENU; break;
+		case CEC_USER_CONTROL_ROOT_MENU: key = alt_launcher_kbd_to_frontend(KEY_ESC) ? KEY_MENU : (menu_present() ? KEY_BACK : KEY_MENU); break;
 		case CEC_USER_CONTROL_EXIT:      key = alt_launcher_kbd_to_frontend(KEY_ESC) ? KEY_ESC : (menu_present() ? KEY_BACK : KEY_MENU); break;
 
 		// additional buttons, may not present nor passed to CEC
