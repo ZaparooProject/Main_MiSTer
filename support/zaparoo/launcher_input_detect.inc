@@ -110,6 +110,12 @@ void input_export_launcher_metadata(void)
 	zaparoo_export_metadata(NULL);
 }
 
+void alt_launcher_send_key(uint16_t code, int press)
+{
+	uinp_send_key(code, press);
+	if (press == 1) zaparoo_export_metadata("keyboard");
+}
+
 // Node to hand gcdb_map_for_controller() when input_cb loads a merged device's
 // map. gcdb resolves a mapping's `bN` entries by enumerating the probed node's
 // EV_KEY bits (get_ctrl_index_maps), while `hN.x` hat entries are arithmetic.

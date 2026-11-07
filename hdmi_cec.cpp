@@ -32,6 +32,7 @@
 #include "smbus.h"
 #include "video.h"
 #include "menu.h"
+#include "support/zaparoo/alt_launcher.h"
 
 #define ADV7513_MAIN_ADDR        0x39
 #define ADV7513_CEC_ADDR         0x3C
@@ -202,6 +203,7 @@ static uint16_t cec_physical_addr = CEC_INVALID_PHYS_ADDR;
 static uint16_t cec_active_physical_addr = CEC_INVALID_PHYS_ADDR;
 static bool     cec_addr_is_fallback = false; // inited without EDID to wake a standby TV
 static uint16_t cec_pressed_key = 0;
+static bool     cec_pressed_to_frontend = false; // the press went to the frontend, so its release must too
 static uint8_t cec_advertise_step = 0;
 static uint8_t cec_advertise_attempts = 0;
 static uint8_t cec_power_on_state = CEC_POWER_ON_DONE;
@@ -266,7 +268,9 @@ static void cec_release_key(void)
 {
 	if (!cec_pressed_key) return;
 
-	user_io_kbd(cec_pressed_key, 0);
+	if (cec_pressed_to_frontend) alt_launcher_send_key(cec_pressed_key, 0);
+	else user_io_kbd(cec_pressed_key, 0);
+	cec_pressed_to_frontend = false;
 	cec_pressed_key = 0;
 	cec_press_deadline = 0;
 }
@@ -292,8 +296,8 @@ static void cec_handle_button(uint8_t button_code, bool pressed)
 		case CEC_USER_CONTROL_LEFT:      key = KEY_LEFT; break;
 		case CEC_USER_CONTROL_RIGHT:     key = KEY_RIGHT; break;
 		case CEC_USER_CONTROL_SELECT:    key = KEY_ENTER; break;
-		case CEC_USER_CONTROL_ROOT_MENU:
-		case CEC_USER_CONTROL_EXIT:      key = menu_present() ? KEY_BACK : KEY_MENU; break;
+		case CEC_USER_CONTROL_ROOT_MENU: key = alt_launcher_kbd_to_frontend(KEY_ESC) ? KEY_MENU : (menu_present() ? KEY_BACK : KEY_MENU); break;
+		case CEC_USER_CONTROL_EXIT:      key = alt_launcher_kbd_to_frontend(KEY_ESC) ? KEY_ESC : (menu_present() ? KEY_BACK : KEY_MENU); break;
 
 		// additional buttons, may not present nor passed to CEC
 		case CEC_USER_CONTROL_PLAY:
@@ -328,7 +332,13 @@ static void cec_handle_button(uint8_t button_code, bool pressed)
 
 	if (!cec_pressed_key)
 	{
-		user_io_kbd(key, 1);
+		cec_pressed_to_frontend = alt_launcher_kbd_to_frontend(key);
+		if (cec_pressed_to_frontend)
+		{
+			user_io_kbd(KEY_RESERVED, 0); // keeps the idle timers running
+			alt_launcher_send_key(key, 1);
+		}
+		else user_io_kbd(key, 1);
 		cec_pressed_key = key;
 	}
 
