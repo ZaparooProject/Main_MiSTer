@@ -3680,13 +3680,18 @@ void video_fb_reassert()
 	{
 		// vmode may resize the launcher's live buffer after video_fb_config().
 		// Re-assert the kernel module's current RGB32 geometry, not stale menu geometry.
+		// video_fb_set() programs fb 0 from the console size, so swap both.
 		int configured_width = fb_width;
 		int configured_height = fb_height;
-		fb_width = width;
-		fb_height = height;
+		int configured_con_width = con_width;
+		int configured_con_height = con_height;
+		fb_width = con_width = width;
+		fb_height = con_height = height;
 		video_fb_set(1, 0, 0);
 		fb_width = configured_width;
 		fb_height = configured_height;
+		con_width = configured_con_width;
+		con_height = configured_con_height;
 	}
 	else
 	{

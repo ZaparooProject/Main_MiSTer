@@ -17,6 +17,7 @@
 
 #include "miniz.h"
 #include "n64.h"
+#include "../retroachievements/retroachievements.h"
 
 #pragma push_macro("NONE")
 #pragma push_macro("BIG_ENDIAN")
@@ -2787,6 +2788,7 @@ int n64_rom_tx(const char* name, const unsigned char idx, const uint32_t load_ad
 	user_io_set_index(idx);
 
 	loaded = 0;
+	ra_n64_set_rom_md5("");
 
 	if (rdram_ptr && rdram_ptr != (void*)-1) {
 		shmem_unmap(rdram_ptr, RAM_SIZE);
@@ -2916,6 +2918,7 @@ int n64_rom_tx(const char* name, const unsigned char idx, const uint32_t load_ad
 	MD5Final(md5, &ctx);
 	md5_to_hex(md5, md5_hex);
 	printf("File MD5: %s\n", md5_hex);
+	ra_n64_set_rom_md5(md5_hex);
 
 	// Try to detect ROM settings from full file MD5 if they're are not detected yet
 	if (!rom_settings_detected) {

@@ -17,6 +17,7 @@
 #include "shmem.h"
 #include "offload.h"
 #include "support/zaparoo/alt_launcher.h"
+#include "support/retroachievements/retroachievements.h"
 #include "support/zaparoo/menu_rbf.h"
 
 #include "fpga_base_addr_ac5.h"
@@ -630,6 +631,7 @@ char *getappname()
 
 void app_restart(const char *path, const char *xml, const char *exe)
 {
+	if (exe && ra_skip_main_restart(exe)) return;
 	// Zaparoo: exe may alias file_io's shared full_path buffer (user_io passes
 	// getFullPath(cfg.main)), which alt_launcher_shutdown() rewrites.
 	static char exe_copy[PATH_MAX];

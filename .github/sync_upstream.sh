@@ -75,11 +75,21 @@ sync_branch() {
         return 0
     fi
 
+    # A stable branch pinned to an upstream commit must not absorb newer
+    # upstream: stable-build.sh takes the fork diff against the pin.
+    if git cat-file -e "origin/${branch}:.github/stable_upstream" 2>/dev/null; then
+        echo "${branch} pins its upstream base in .github/stable_upstream; skipping."
+        echo "${branch}_changed=false" >> "${GITHUB_OUTPUT:-/dev/null}"
+        return 0
+    fi
+
     git checkout -q -B "${branch}" "origin/${branch}"
     local before after
     before=$(git rev-parse HEAD)
 
-    if ! git merge -Xignore-all-space --no-edit "upstream/${MAIN_BRANCH}"; then
+    # Plain merge, like the rerere training above: -Xignore-all-space kept the
+    # fork's stale whitespace wherever upstream re-indented.
+    if ! git merge --no-edit "upstream/${MAIN_BRANCH}"; then
         # rerere replays a recorded resolution into the working tree but
         # leaves the merge uncommitted. When it has resolved every conflicted
         # file, finish the merge here; anything it could not resolve still

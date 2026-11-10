@@ -41,6 +41,7 @@ as rotated copies of the first 128 entries.  -- AMR
 #include "osd.h"
 #include "cfg.h"
 #include "spi.h"
+#include "support/retroachievements/retroachievements.h"
 
 #include "charrom.h"
 #include "logo.h"
@@ -550,6 +551,7 @@ static void osd_enable(uint8_t cmd, uint16_t x, uint16_t y, uint16_t width, uint
 // enable displaying of OSD
 void OsdEnable(unsigned char mode)
 {
+	ra_osd_enable(mode);
 	user_io_osd_key_enable(mode & DISABLE_KEYBOARD);
 	mode &= (DISABLE_KEYBOARD | OSD_MSG);
 	osd_enable(OSD_CMD_ENABLE | mode, 0, 0, 0, 0);

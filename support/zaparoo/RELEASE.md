@@ -21,7 +21,8 @@ release channels, so upstream syncing and fork-feature promotion are decoupled.
 - **Unstable** (`.github/build_unstable_release.sh` → `unstable-build.sh`): upstream `master`
   HEAD base + `git diff upstream/master..master`.
 - **Stable** (`.github/build_release.sh` → `stable-build.sh`): upstream's latest tagged
-  release (`releases/MiSTer_*`) base + `git diff upstream/master..stable`, applied with
+  release (`releases/MiSTer_*`) base, or the upstream commit pinned in
+  `.github/stable_upstream` (see below), + `git diff upstream/master..stable`, applied with
   `git apply -3` (3-way, tolerates upstream drift) — `MiSTer.ini` is the only exclusion.
 
 Each channel is built from a checkout of its **own branch**, so its content, build scripts,
@@ -48,3 +49,28 @@ The stable build applies the **full** fork diff with `git apply -3`, so hooks in
 / `scheduler.cpp` promote exactly like any other fork-touched file — there is no separate
 hook list to maintain. If upstream ever drifts those files enough that the 3-way apply
 conflicts, the stable build fails loudly (rather than silently shipping a stale hook set).
+
+## Pinning stable to an upstream master commit
+
+When fork features depend on upstream changes that are not in a tagged release yet, the
+fork diff cannot apply to the release and the stable build fails. Pin the stable base to
+the upstream `master` commit the fork was merged with instead:
+
+```sh
+git checkout stable
+git merge master
+git merge-base HEAD upstream/master > .github/stable_upstream
+git add .github/stable_upstream && git commit -m "build: pin stable to upstream master"
+git push origin stable      # MiSTer_Zaparoo_<pin commit date, UTC>
+```
+
+While `.github/stable_upstream` exists on `stable`:
+
+- the base is the pinned commit, and the fork diff is `git diff <pin>..stable`;
+- the release tag and notes use the pin's commit date and `master@<short sha>`;
+- the daily sync skips `stable`, so it keeps exactly the pin plus the fork;
+- the build fails if `stable` contains upstream commits past the pin. A later promotion
+  that merges newer upstream must update the pin in the same push.
+
+Once upstream tags a release that contains the pin, delete the file on `stable` to go
+back to tagged-release bases.
