@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build MiSTer_Zaparoo from the latest upstream stable MiSTer release.
+# Build MiSTer_Zaparoo from the latest upstream stable MiSTer release, or from
+# the upstream commit pinned in .github/stable_upstream.
 #
 # The build happens in a temporary worktree so the current checkout can stay on
 # upstream master for development. The resulting binaries are copied to bin/.
@@ -33,27 +34,67 @@ git fetch --no-tags --prune --no-recurse-submodules "${UPSTREAM_REMOTE}" \
     "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}"
 
 UPSTREAM_REF="${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}"
-STABLE_COMMIT=${PINNED_STABLE_COMMIT}
-if [ -z "${STABLE_COMMIT}" ]; then
-    STABLE_COMMIT=$(git log -1 --format=%H "${UPSTREAM_REF}" -- 'releases/MiSTer_*')
-fi
-if [ -z "${STABLE_COMMIT}" ]; then
-    echo "error: could not find an upstream stable release commit" >&2
-    exit 1
-fi
-if ! git merge-base --is-ancestor "${STABLE_COMMIT}" "${UPSTREAM_REF}"; then
-    echo "error: stable commit ${STABLE_COMMIT} is not reachable from ${UPSTREAM_REF}" >&2
-    exit 1
+
+# .github/stable_upstream pins the stable base to an upstream master commit
+# instead of upstream's latest tagged release. Use it when the fork needs
+# upstream changes that are not released yet, so the fork diff cannot apply to
+# the release. While a pin is set, the daily sync leaves this branch alone, so
+# the branch tree is exactly the pin plus the fork. Delete the file to go back
+# to tagged releases once upstream releases past the pin.
+PIN_FILE=".github/stable_upstream"
+UPSTREAM_PIN=""
+if [ -f "${PIN_FILE}" ]; then
+    UPSTREAM_PIN=$(grep -v '^[[:space:]]*#' "${PIN_FILE}" | tr -d '[:space:]')
 fi
 
-STABLE_FILE=$(git diff-tree --no-commit-id --name-only -r "${STABLE_COMMIT}" -- 'releases/MiSTer_*' | sort | tail -n 1)
-if [ -z "${STABLE_FILE}" ]; then
-    echo "error: latest upstream release commit does not add a releases/MiSTer_* file" >&2
-    exit 1
-fi
+if [ -n "${UPSTREAM_PIN}" ]; then
+    STABLE_COMMIT=$(git rev-parse --verify --quiet "${UPSTREAM_PIN}^{commit}") || {
+        echo "error: ${PIN_FILE} names ${UPSTREAM_PIN}, which is not a known commit" >&2
+        exit 1
+    }
+    if [ -n "${PINNED_STABLE_COMMIT}" ] && [ "${PINNED_STABLE_COMMIT}" != "${STABLE_COMMIT}" ]; then
+        echo "error: pinned commit changed between metadata and build" >&2
+        exit 1
+    fi
+    if ! git merge-base --is-ancestor "${STABLE_COMMIT}" "${UPSTREAM_REF}"; then
+        echo "error: ${PIN_FILE} commit ${STABLE_COMMIT} is not on ${UPSTREAM_REF}" >&2
+        exit 1
+    fi
+    # The fork diff is taken against the pin, so the branch must contain the
+    # pin and no upstream commit after it.
+    BRANCH_UPSTREAM=$(git merge-base HEAD "${UPSTREAM_REF}")
+    if [ "${BRANCH_UPSTREAM}" != "${STABLE_COMMIT}" ]; then
+        echo "error: this branch contains upstream up to ${BRANCH_UPSTREAM}, but ${PIN_FILE} pins ${STABLE_COMMIT}" >&2
+        echo "       update the pin to the upstream commit the branch merged" >&2
+        exit 1
+    fi
+    STABLE_DATE=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d "${STABLE_COMMIT}")
+    STABLE_NAME="master@$(git rev-parse --short "${STABLE_COMMIT}")"
+    FORK_BASE="${STABLE_COMMIT}"
+else
+    STABLE_COMMIT=${PINNED_STABLE_COMMIT}
+    if [ -z "${STABLE_COMMIT}" ]; then
+        STABLE_COMMIT=$(git log -1 --format=%H "${UPSTREAM_REF}" -- 'releases/MiSTer_*')
+    fi
+    if [ -z "${STABLE_COMMIT}" ]; then
+        echo "error: could not find an upstream stable release commit" >&2
+        exit 1
+    fi
+    if ! git merge-base --is-ancestor "${STABLE_COMMIT}" "${UPSTREAM_REF}"; then
+        echo "error: stable commit ${STABLE_COMMIT} is not reachable from ${UPSTREAM_REF}" >&2
+        exit 1
+    fi
 
-STABLE_NAME=$(basename "${STABLE_FILE}")
-STABLE_DATE=${STABLE_NAME#MiSTer_}
+    STABLE_FILE=$(git diff-tree --no-commit-id --name-only -r "${STABLE_COMMIT}" -- 'releases/MiSTer_*' | sort | tail -n 1)
+    if [ -z "${STABLE_FILE}" ]; then
+        echo "error: latest upstream release commit does not add a releases/MiSTer_* file" >&2
+        exit 1
+    fi
+
+    STABLE_NAME=$(basename "${STABLE_FILE}")
+    STABLE_DATE=${STABLE_NAME#MiSTer_}
+    FORK_BASE="${UPSTREAM_REF}"
+fi
 
 if [ -n "${METADATA_FILE}" ]; then
     cat >"${METADATA_FILE}" <<EOF
@@ -86,7 +127,7 @@ git worktree add --detach "${TMP_WORKTREE}" "${STABLE_COMMIT}" >/dev/null
 # fork diff stays the single source of truth. MiSTer.ini is excluded: the fork's
 # only change is an uncomment of a default-valued line, and stable's example ini
 # drifts often enough to cause spurious conflicts.
-FORK_DIFF=$(git diff --binary "${UPSTREAM_REF}..${FORK_HEAD}" -- . \
+FORK_DIFF=$(git diff --binary "${FORK_BASE}..${FORK_HEAD}" -- . \
     ':(exclude)MiSTer.ini')
 if [ -n "${FORK_DIFF}" ]; then
     printf '%s\n' "${FORK_DIFF}" | git -C "${TMP_WORKTREE}" apply -3 --index
