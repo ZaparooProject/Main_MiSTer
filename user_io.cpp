@@ -2266,6 +2266,7 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 
 	sd_image_cangrow[index] = (pre != 0);
 	sd_type[index] = SD_TYPE_DEFAULT ;
+	st_fdd_unmount(index);
 	if (len)
 	{
 		if (!ret)
@@ -2368,6 +2369,8 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 				// Falcon SCSI slots: image registration, CD cue/bin translation (support/falcon)
 				if (ret) ret = falcon_scsi_mount_hook(index, name, &sd_image[index], &writable);
 
+				if (ret) ret = st_fdd_mount_hook(index, name, &sd_image[index], &writable);
+
 				if (ret && is_c128())
 				{
 					printf("Disk image type: %d\n", img_type);
@@ -2393,6 +2396,7 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 		next_unmount(index);
 		a3_unmount(index);
 		falcon_scsi_unmount(index);
+		st_fdd_unmount(index);
 	}
 
 	buffer_lba[index] = -1;
@@ -2437,6 +2441,7 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 	spi8(UIO_SET_SDINFO);
 
 	__off64_t size = pc88_size(index, sd_image[index].size);
+	if (ret) size = (__off64_t)st_fdd_size(index, (uint64_t)size);
 	if (!ret && pre)
 	{
 		sd_image[index].type = 2;
@@ -3629,6 +3634,10 @@ void user_io_poll()
 			else if (int pc88op = pc88_sd_service(disk, &sd_image[disk], op, lba, sz, ack))
 			{
 				if (pc88op < 0) break;
+			}
+			else if (int stop = st_fdd_sd_service(disk, op, lba, sz, ack))
+			{
+				if (stop < 0) break;
 			}
 			else if (int falop = falcon_sd_service(disk, op, lba, sz, ack))
 			{
