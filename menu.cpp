@@ -54,6 +54,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "support/zaparoo/alt_launcher_menu.h"
 #include "support/zaparoo/launcher_pages.h"
 #include "support/zaparoo/menu_rbf.h"
+#include "support/zaparoo/screenshot_artwork.h"
 #include "support/retroachievements/retroachievements.h"
 #include "user_io.h"
 #include "debug.h"
@@ -271,6 +272,7 @@ enum MENU
 	MENU_RA_LIST2,
 	MENU_RA_DETAIL1,
 	MENU_RA_DETAIL2,
+	MENU_ZAPAROO_ARTWORK,
 };
 
 static uint32_t menustate = MENU_NONE1;
@@ -1252,6 +1254,15 @@ static void joymap_system_return(int system_sub, int core_sub)
 	menusub = is_menu() ? system_sub : core_sub;
 }
 
+bool zaparoo_artwork_can_open()
+{
+	return menustate <= MENU_INFO && user_io_core_type() == CORE_TYPE_8BIT &&
+		!is_menu() && mgl_get()->done && !video_fb_state() && !select_ini &&
+		osd_unlocked && !(cfg.osd_lock[0] && cfg.osd_lock_time && osd_lock_timer && CheckTimer(osd_lock_timer)) &&
+		!user_io_osd_is_visible() && !get_map_active() &&
+		!alt_launcher_console_lease_active() && !zaparoo_kiosk_active();
+}
+
 void HandleUI(void)
 {
 	PROFILE_FUNCTION();
@@ -1343,6 +1354,7 @@ void HandleUI(void)
 	uint32_t c = 0;
 
 	mgl_struct *mgl = mgl_get();
+	const bool artwork_open = menustate == MENU_ZAPAROO_ARTWORK;
 
 	/*
 	static int old_state = -1;
@@ -1434,6 +1446,22 @@ void HandleUI(void)
 	{
 		// get user control codes
 		c = menu_key_get();
+	}
+	if (artwork_open && menustate != MENU_ZAPAROO_ARTWORK) zaparoo_artwork_menu_close();
+	if (menustate == MENU_ZAPAROO_ARTWORK)
+	{
+		if (!mgl->done || is_menu() || zaparoo_kiosk_active() || zaparoo_artwork_menu_update(c))
+		{
+			zaparoo_artwork_menu_close();
+			OsdDisable();
+			menustate = MENU_NONE1;
+		}
+		return;
+	}
+	if (zaparoo_artwork_menu_poll())
+	{
+		menustate = MENU_ZAPAROO_ARTWORK;
+		return;
 	}
 	int map_hold_action = poll_map_hold_action();
 	if (map_hold_action) c = 0;
@@ -9550,6 +9578,11 @@ void InfoMessage(const char *message, int timeout, const char *title)
 
 void MenuHide()
 {
+	if (menustate == MENU_ZAPAROO_ARTWORK)
+	{
+		zaparoo_artwork_menu_close();
+		OsdDisable();
+	}
 	menustate = MENU_NONE1;
 	HandleUI();
 }

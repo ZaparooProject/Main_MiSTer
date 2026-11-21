@@ -30,6 +30,7 @@ const int VEC_WIDTH = 16;
 #include "shmem.h"
 #include "file_io.h"
 #include "menu.h"
+#include "support/zaparoo/screenshot_artwork.h"
 
 #ifdef PROFILING
 #include "profiling.h"
@@ -409,9 +410,6 @@ static bool screenshot_requested = false;
 static int screenshot_rescale = 0;
 static char* screenshot_filename = NULL;
 
-bool write_screenshot(const char *filename, const uint8_t *argb,
-                      int width, int height, int output_width = 0, int output_height = 0);
-
 // atomic variables for worker process
 static std::atomic<bool> screenshot_pending_atomic{false};
 static std::atomic<ScreenshotResult_atomic*> screenshot_result_data_atomic{nullptr};
@@ -486,7 +484,7 @@ bool write_screenshot(const char *filename, const uint8_t *inbuf,
     }
 
     Imlib_Load_Error error;
-    imlib_save_image_with_error_return(getFullPath(filename), &error);
+    imlib_save_image_with_error_return(filename[0] == '/' ? filename : getFullPath(filename), &error);
 
     if (scaled && scaled != im) {
         imlib_context_set_image(scaled);
@@ -642,6 +640,7 @@ void request_screenshot(char *cmd, int scaled)
 
 void screenshot_cb(void)
 {
+    zaparoo_artwork_capture_frame();
     ScreenshotResult_atomic *result_data =
         screenshot_result_data_atomic.exchange(nullptr);
 

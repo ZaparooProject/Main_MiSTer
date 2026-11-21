@@ -12,6 +12,17 @@ static const char s_active_game_file[] = "/tmp/ACTIVEGAME";
 // is rewritten on the next launch, so its path never identifies a game.
 static const char s_launcher_temp_mgl[] = "/media/fat/.LASTLAUNCH.mgl";
 
+bool zaparoo_active_game_read(char *path, size_t capacity)
+{
+	FILE *file = fopen(s_active_game_file, "r");
+	if (!file) return false;
+	size_t size = fread(path, 1, capacity, file);
+	bool valid = size && size < capacity && feof(file) && !ferror(file) && !memchr(path, 0, size);
+	fclose(file);
+	if (valid) path[size] = 0;
+	return valid;
+}
+
 static void active_game_write(const char *path)
 {
 	const char *value = (path && path[0]) ? getFullPath(path) : "";
