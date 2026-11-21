@@ -12,6 +12,7 @@
 #include <linux/input.h>
 
 #include "launcher_input_metadata.h"
+#include "json_string.h"
 #include "../../input.h"
 
 #define LIM_PATH      "/tmp/zaparoo_launcher_input.json"
@@ -134,29 +135,6 @@ static int detect_profile(const launcher_input_snapshot *snap, const char **conf
 
 	*confidence = "generic";
 	return PROFILE_GENERIC;
-}
-
-static void json_str(FILE *fp, const char *s)
-{
-	putc('"', fp);
-	for (; *s; s++)
-	{
-		unsigned char c = (unsigned char)*s;
-		switch (c)
-		{
-		case '"':  fputs("\\\"", fp); break;
-		case '\\': fputs("\\\\", fp); break;
-		case '\b': fputs("\\b", fp);  break;
-		case '\f': fputs("\\f", fp);  break;
-		case '\n': fputs("\\n", fp);  break;
-		case '\r': fputs("\\r", fp);  break;
-		case '\t': fputs("\\t", fp);  break;
-		default:
-			if (c < 0x20) fprintf(fp, "\\u%04x", c);
-			else putc(c, fp);
-		}
-	}
-	putc('"', fp);
 }
 
 struct action_out
