@@ -8358,7 +8358,7 @@ void HandleUI(void)
 		{
 			position_page_leave();
 			menustate = MENU_ZAPAROO_FRONTEND1;
-			menusub = 6;
+			menusub = 5;
 			break;
 		}
 		if (left || right || plus || minus)
