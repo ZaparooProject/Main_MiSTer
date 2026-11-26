@@ -4,6 +4,7 @@
 #include "achievements.h"
 #include "ra_ramread.h"
 #include "user_io.h"
+#include "support.h"
 #include <string.h>
 #include <time.h>
 #include <stdio.h>
