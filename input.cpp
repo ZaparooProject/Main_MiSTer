@@ -39,6 +39,7 @@
 #include "support/zaparoo/alt_launcher.h"
 #include "support/zaparoo/command_stream.h"
 #include "support/zaparoo/launcher_input_metadata.h"
+#include "support/zaparoo/screenshot_artwork.h"
 #include "support/retroachievements/retroachievements.h"
 
 #define UINPUT_NAME "MiSTer virtual input"
@@ -2077,6 +2078,7 @@ static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int 
 			osd_autofire_consumed[num] = false;
 			return;
 		}
+		if (bnum == BTN_OSD && zaparoo_artwork_menu_button(jnum, press)) return;
 
 		// clear OSD button state if not in the OSD.  this avoids problems where buttons are still held
 		// on OSD exit and causes combinations to match when partial buttons are pressed.
@@ -2857,8 +2859,12 @@ static void osd_hold_poll()
 		}
 		else
 		{
+			// In gameplay, keep the mapped press active until physical release.
+			// Elsewhere, retain the normal hold binding's synthesized tap.
+			const bool await_release = zaparoo_artwork_can_open();
 			joy_digital(input[dev].num, 0, 0, 1, BTN_OSD);
-			input[dev].osd_hold_release_at = GetTimer(OSD_HOLD_CLICK_MS);
+			if (await_release) input[dev].osd_combo = 3;
+			else input[dev].osd_hold_release_at = GetTimer(OSD_HOLD_CLICK_MS);
 		}
 	}
 }
