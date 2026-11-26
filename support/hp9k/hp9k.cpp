@@ -8,6 +8,7 @@
 #include "../../spi.h"
 #include "../../file_io.h"
 #include "hp9k.h"
+#include "hp9k_enet.h"
 #include "hp9k_cdrom.h"
 #include "hp9k_disk.h"
 
@@ -22,7 +23,7 @@ struct hp9k_model_info
 
 static const hp9k_model_info models[] =
 {
-	{ "HP9K715", HP9K_715, 3, "[14:12]", 0x0 },
+	{ "HP9K715", HP9K_715, 3, "[14:12]", 0x5 },   // disks on slots 0 and 2
 	{ "HP9K385", HP9K_385, 2, "[14:12]", 0x3 },
 };
 
@@ -43,7 +44,17 @@ hp9k_model_t hp9k_model()
 
 char is_hp9k_family()
 {
-	return model_info() != 0;
+	static int type = 0;
+	if (!type)
+	{
+		type = (model_info() != 0) ? 1 : 2;
+		if (type == 1)
+		{
+			sd_service = hp9k_sd_service;
+			core_poll = hp9k_poll;
+		}
+	}
+	return type == 1;
 }
 
 const char *hp9k_net_status()
@@ -95,6 +106,7 @@ void hp9k_unmount(int index)
 void hp9k_poll()
 {
 	hp9k_disk_poll();
+	hp9k_enet_poll();
 }
 
 int hp9k_sd_service(int disk, fileTYPE *f, int op, uint64_t lba, int sz, int ack)

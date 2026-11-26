@@ -20,4 +20,7 @@ int n64_rom_tx(const char* name, const unsigned char index, const uint32_t load_
 const char* n64_get_rom_md5();
 bool n64_process_save(const bool use_save, const int op, const uint64_t sector_index, const uint32_t sector_size, const int ack_flags, uint64_t& confirmed_sector, uint8_t* buffer, const uint32_t buffer_capacity, uint32_t chunk_size);
 
+char is_n64();
+
+
 #endif

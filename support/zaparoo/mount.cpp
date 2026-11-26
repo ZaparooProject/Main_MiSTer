@@ -92,7 +92,7 @@ bool zaparoo_mount(int pos, const char *path)
 
 	// Dispatch mirrors the SC auto-mount path in user_io_init, not the OSD's,
 	// because the OSD version indexes off the highlighted menu row.
-	if (is_x86() || is_pcxt() || (is_uneon() && slot >= 2))
+	if (is_x86() || is_pcxt())
 	{
 		x86_set_image(slot, p);
 	}

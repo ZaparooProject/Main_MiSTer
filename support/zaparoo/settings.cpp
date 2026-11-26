@@ -10,7 +10,9 @@ static const char s_settings_file[] = "zaparoo_settings.bin";
 #define IDX_FRONTEND_DISABLED 0
 #define IDX_KIOSK             1
 #define IDX_SAVE_ON_EXIT      2
-#define IDX_CD_AUTORUN        3
+// Formerly disc auto-run. Kept so existing settings files keep their layout;
+// do not reuse.
+#define IDX_RESERVED_3        3
 
 static uint8_t s_blob[ZAPAROO_SETTINGS_SIZE];
 static bool s_loaded = false;
@@ -78,16 +80,6 @@ bool zaparoo_settings_save_on_exit(void)
 bool zaparoo_settings_set_save_on_exit(bool on)
 {
 	return settings_set(IDX_SAVE_ON_EXIT, on ? 1 : 0);
-}
-
-bool zaparoo_settings_cd_autorun(void)
-{
-	return settings_blob()[IDX_CD_AUTORUN] != 0;
-}
-
-bool zaparoo_settings_set_cd_autorun(bool on)
-{
-	return settings_set(IDX_CD_AUTORUN, on ? 1 : 0);
 }
 
 void zaparoo_settings_invalidate(void)
