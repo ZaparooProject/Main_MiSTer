@@ -5,6 +5,7 @@
 
 #include "spi.h"
 #include "user_io.h"
+#include "support.h"
 
 // substrcpy() has no destination bound and a config item can run to 2 KB, so
 // every field copied out of one here goes through this instead. Same field
